@@ -1,5 +1,5 @@
 {
-  "name": "bun-react-template",
+  "name": "dash.v",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "bun-plugin-tailwind": "^0.1.2",
-    "hono": "^4.12.7",
     "react": "^19",
     "react-dom": "^19",
     "tailwindcss": "^4.1.11"
