@@ -11,6 +11,7 @@ __pycache__/
 # IDE and OS
 .idea/
 .DS_Store
+frontend/node_modules/
 
 # local data and notes
 data/

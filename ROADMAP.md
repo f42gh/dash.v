@@ -1,6 +1,6 @@
 # dash.v Roadmap
 
-最終更新: 2026-04-30
+最終更新: 2026-05-01
 
 ## 1. 目的
 - 個人の行動ログを毎日残し、振り返りをすぐ見られるダッシュボードを育てる
@@ -13,17 +13,27 @@
 - 特に `Milestone` を時間軸の中心として扱う
 - 目標: 「今どこを走っているか」と「どこを走ってきたか」を一目で把握できること
 
+## 1.2 体験設計（新）
+- 3つの主操作を1つの連続体験として設計する
+- 画面セクション:
+- `submit effort (home)`
+- `analysis`
+- `edit done`
+- 遷移設計:
+- スクロール時にセクション単位で吸着して切り替わるUIを採用する
+- 用語: `Scroll Snap`（CSS Scroll Snap / Snap Scrolling / Full-page Snap）
+
 ## 2. 現在の構成（As-Is）
 - Runtime: Python (`uv`)
-- App: Plotly Dash（`app.py`）
+- App: FastAPI + React(TypeScript)（`app.py`, `frontend/src/`）
 - Data: SQLite（`data/dash.db`）
 - 主機能:
 - 日付選択
-- エントリー追加（title/category/score/note）
-- エントリー削除
-- 日次KPI（件数・平均スコア）
+- effortログ追加（自動時刻取得）
+- effortログ編集・削除
+- 日次KPI（件数・平均effort）
 - 7日チャート
-- カテゴリ内訳
+- 時間帯別チャート
 
 ## 3. 直近方針（MVP First）
 - 方針: 最小完成版を維持しつつ、機能を小さく追加して検証する
@@ -40,11 +50,14 @@
 - [x] Python + Dash + SQLite へ統一
 - [x] `uv` で依存管理と実行を統一
 
-### Phase 1: 入力体験の改善（次）
-- [ ] Enter で追加しやすいフォーム動線
-- [ ] 追加直後のフォーカス制御（title に戻す）
-- [ ] バリデーション文言の整理
-- [ ] カテゴリのカスタム追加（固定値+自由入力の検討）
+### Phase 1: 入力体験の改善（完了）
+- [x] Enter で追加しやすいフォーム動線（メモ欄Enterで記録）
+- [x] 追加直後のフォーカス制御（メモ欄に復帰）
+- [x] 失敗時メッセージの明確化（再試行導線）
+- [x] effort尺度の運用定義を固定（1〜5判断基準をUIに明示）
+- [x] 3セクション構成（home / analysis / edit done）をUIに固定
+- [x] Scroll Snap によるセクション遷移を実装（磁石的な吸着）
+- [x] 現在セクションのインジケーター（ドット）を追加
 
 ### Phase 1.5: 入れ子モデル導入（最優先）
 - [ ] DBスキーマ追加: `projects`, `milestones`, `issues`

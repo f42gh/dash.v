@@ -62,3 +62,14 @@
   - 画面・状態管理の複雑度はまだ手動運用可能な範囲
 - 将来の導入トリガー:
   - `project -> milestone -> issue/task` の3層UIが拡大し、ルーティング・キャッシュ・認証・SSR最適化が必要になった時
+
+## 2026-05-01 — Phase 1 完了（TypeScript + Scroll Snap UI）
+- フロントを TypeScript に移行し、`frontend/src/main.tsx` を中心に再構成
+- 3セクションUIを確定:
+  - `submit effort (home)`
+  - `analysis`
+  - `edit done`
+- セクション遷移に `CSS Scroll Snap` を導入（磁石的に吸着するスクロール体験）
+- 現在位置インジケーター（ドット）を実装し、クリックジャンプを追加
+- effort運用基準（1〜5）を画面上で固定表示し、入力判断を統一
+- `ROADMAP.md` の Phase 1 を完了状態へ更新

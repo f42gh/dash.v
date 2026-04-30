@@ -7,6 +7,9 @@ FastAPI API + React UI + SQLite で構成した個人ダッシュボードです
 
 ```bash
 uv sync
+cd frontend
+bun install
+bun run build
 ```
 
 ## 起動
@@ -15,7 +18,7 @@ uv sync
 uv run uvicorn app:app --reload
 ```
 
-ブラウザで `http://127.0.0.1:8050` を開いて利用します。
+ブラウザで `http://127.0.0.1:8000` を開いて利用します。
 
 ## データ
 
