@@ -17120,13 +17120,6 @@ var import_client = __toESM(require_client(), 1);
 var jsx_dev_runtime = __toESM(require_jsx_dev_runtime(), 1);
 var API = "";
 var SECTION_ORDER = ["home", "analysis", "edit"];
-var EFFORT_GUIDE = [
-  "1: 着手だけ。開始はしたが進捗はほぼ出ていない",
-  "2: 軽く進めた。確認や小タスクを完了",
-  "3: 1ブロック進捗。明確な1タスクを終えた",
-  "4: 明確に前進。難所突破または複数タスク完了",
-  "5: 節目を突破。マイルストーンを1つ前進"
-];
 function todayKey() {
   const now = new Date;
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -17143,12 +17136,51 @@ function Plot(props) {
     ref
   }, undefined, false, undefined, this);
 }
+function EffortPile(props) {
+  const steps = 10;
+  const active = Math.round(props.value / 10);
+  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+    className: "pile-wrap",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+        className: "pile-number",
+        children: props.value
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+        className: "pile",
+        role: "slider",
+        "aria-valuemin": 0,
+        "aria-valuemax": 100,
+        "aria-valuenow": props.value,
+        children: Array.from({ length: steps }).map((_, i) => {
+          const level = steps - i;
+          const fill = level <= active;
+          return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+            type: "button",
+            className: fill ? "pile-block on" : "pile-block",
+            onClick: () => props.onChange(level * 10),
+            title: `${level * 10}`
+          }, level, false, undefined, this);
+        })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+        type: "range",
+        min: "0",
+        max: "100",
+        step: "1",
+        value: props.value,
+        onChange: (e) => props.onChange(Number(e.target.value))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function App() {
   const [dateKey, setDateKey] = import_react.useState(todayKey());
   const [clock, setClock] = import_react.useState("");
-  const [effort, setEffort] = import_react.useState(3);
+  const [effort, setEffort] = import_react.useState(60);
   const [note, setNote] = import_react.useState("");
   const [logs, setLogs] = import_react.useState([]);
+  const [impressive, setImpressive] = import_react.useState([]);
   const [stats, setStats] = import_react.useState({ day: { total: 0, avg_effort: null }, weekly: [], by_hour: [] });
   const [message, setMessage] = import_react.useState("");
   const [editRows, setEditRows] = import_react.useState({});
@@ -17156,17 +17188,41 @@ function App() {
   const noteInputRef = import_react.useRef(null);
   const snapContainerRef = import_react.useRef(null);
   const sectionRefs = import_react.useRef({ home: null, analysis: null, edit: null });
+  const initializedDateRef = import_react.useRef(false);
+  const nearestImpressive = import_react.useMemo(() => {
+    if (impressive.length === 0)
+      return null;
+    const sorted = [...impressive].sort((a, b) => Math.abs(a.effort - effort) - Math.abs(b.effort - effort));
+    return sorted[0];
+  }, [impressive, effort]);
   async function refresh() {
-    const [timeRes, logsRes, statsRes] = await Promise.all([
+    const [timeRes, logsRes, statsRes, impressiveRes] = await Promise.all([
       fetch(`${API}/api/time`),
       fetch(`${API}/api/efforts?date=${dateKey}`),
-      fetch(`${API}/api/stats?date=${dateKey}`)
+      fetch(`${API}/api/stats?date=${dateKey}`),
+      fetch(`${API}/api/impressive-tasks`)
     ]);
     const time = await timeRes.json();
     setClock(`${time.date_key} ${String(time.hour_key).padStart(2, "0")}:00`);
     setLogs(await logsRes.json());
     setStats(await statsRes.json());
+    setImpressive(await impressiveRes.json());
   }
+  async function bootstrapDate() {
+    if (initializedDateRef.current)
+      return;
+    initializedDateRef.current = true;
+    const res = await fetch(`${API}/api/latest-date`);
+    if (!res.ok)
+      return;
+    const data = await res.json();
+    if (data.latest_date && data.latest_date !== dateKey) {
+      setDateKey(data.latest_date);
+    }
+  }
+  import_react.useEffect(() => {
+    bootstrapDate();
+  }, []);
   import_react.useEffect(() => {
     refresh();
   }, [dateKey]);
@@ -17179,12 +17235,12 @@ function App() {
     if (!root)
       return;
     const observer = new IntersectionObserver((entries) => {
-      const inView = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      const inView = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
       if (inView.length === 0)
         return;
-      const sectionName = inView[0].target.getAttribute("data-section");
-      if (sectionName)
-        setActiveSection(sectionName);
+      const name = inView[0].target.getAttribute("data-section");
+      if (name)
+        setActiveSection(name);
     }, { root, threshold: [0.55, 0.75] });
     SECTION_ORDER.forEach((key) => {
       const node = sectionRefs.current[key];
@@ -17194,9 +17250,7 @@ function App() {
     return () => observer.disconnect();
   }, []);
   function jumpToSection(section) {
-    const node = sectionRefs.current[section];
-    if (node)
-      node.scrollIntoView({ behavior: "smooth", block: "start" });
+    sectionRefs.current[section]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   async function addLog() {
     const res = await fetch(`${API}/api/efforts`, {
@@ -17218,6 +17272,10 @@ function App() {
     const row = logs.find((item) => item.id === id);
     if (!row)
       return;
+    if (row.edit_done === 1) {
+      setMessage(`ID ${id} は編集ロック済みです`);
+      return;
+    }
     const body = {
       date_key: patch.date_key ?? row.date_key,
       hour_key: Number(patch.hour_key ?? row.hour_key),
@@ -17229,7 +17287,12 @@ function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
-    setMessage(res.ok ? `ID ${id} を更新しました` : `ID ${id} の更新に失敗しました`);
+    if (res.status === 403) {
+      setMessage(`ID ${id} は編集可能期間を過ぎたためロックされています`);
+      await refresh();
+      return;
+    }
+    setMessage(res.ok ? `ID ${id} を更新しました（このログは編集完了になりました）` : `ID ${id} の更新に失敗しました`);
     if (res.ok) {
       setEditRows((prev) => {
         const next = { ...prev };
@@ -17278,16 +17341,6 @@ function App() {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("nav", {
-        className: "section-indicator",
-        "aria-label": "section navigation",
-        children: SECTION_ORDER.map((section) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-          className: activeSection === section ? "dot active" : "dot",
-          onClick: () => jumpToSection(section),
-          title: section,
-          "aria-label": section
-        }, section, false, undefined, this))
-      }, undefined, false, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
         className: "snap-container",
         ref: snapContainerRef,
@@ -17298,154 +17351,181 @@ function App() {
             ref: (node) => {
               sectionRefs.current.home = node;
             },
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                className: "panel input-panel",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                    className: "field",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-                        children: "記録日"
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                        type: "date",
-                        value: dateKey,
-                        onChange: (event) => setDateKey(event.target.value)
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                    className: "field grow",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-                        children: "Effort (1-5)"
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                        type: "range",
-                        min: "1",
-                        max: "5",
-                        value: effort,
-                        onChange: (event) => setEffort(Number(event.target.value))
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                        className: "effort-value",
-                        children: effort
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                    className: "field grow",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-                        children: "メモ（任意）"
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                        ref: noteInputRef,
-                        value: note,
-                        onChange: (event) => setNote(event.target.value),
-                        onKeyDown: onQuickSubmit,
-                        placeholder: "あとで見返す一言（Enterで記録）"
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-                    className: "accent",
-                    onClick: addLog,
-                    children: "今の努力量を記録"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                className: "panel effort-guide",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h3", {
-                    children: "Effort運用基準（固定）"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("ul", {
-                    children: EFFORT_GUIDE.map((row) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("li", {
-                      children: row
-                    }, row, false, undefined, this))
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
+            children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+              className: "islands",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                  className: "panel island island-compact input-stack",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                      className: "field",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                          children: "記録日"
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                          type: "date",
+                          value: dateKey,
+                          onChange: (event) => setDateKey(event.target.value)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                      className: "field",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                          children: "メモ（任意）"
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                          ref: noteInputRef,
+                          value: note,
+                          onChange: (event) => setNote(event.target.value),
+                          onKeyDown: onQuickSubmit,
+                          placeholder: "あとで見返す一言（Enterで記録）"
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                      className: "accent dopamine-submit",
+                      onClick: addLog,
+                      children: "Stack This Effort"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                  className: "panel island island-compact effort-field",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                      children: "Effort (0-100)"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV(EffortPile, {
+                      value: effort,
+                      onChange: setEffort
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                  className: "panel island impressive-panel",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h3", {
+                      children: "Impressive Baseline"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                      className: "muted",
+                      children: "過去の impressive task を基準に、今日の effort をチューニングする"
+                    }, undefined, false, undefined, this),
+                    nearestImpressive ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                      className: "impressive-focus",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("strong", {
+                          children: nearestImpressive.title
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                          children: [
+                            nearestImpressive.effort,
+                            " / 100"
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                          children: nearestImpressive.note ?? "記録なし"
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                      className: "muted",
+                      children: "impressive task がまだありません。"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                      className: "impressive-list",
+                      children: impressive.map((task) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
+                        className: "impressive-card",
+                        children: [
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("header", {
+                            children: [
+                              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("strong", {
+                                children: task.title
+                              }, undefined, false, undefined, this),
+                              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                                children: task.effort
+                              }, undefined, false, undefined, this)
+                            ]
+                          }, undefined, true, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                            children: task.note ?? "記録なし"
+                          }, undefined, false, undefined, this)
+                        ]
+                      }, task.id, true, undefined, this))
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
           /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
             className: "snap-section",
             "data-section": "analysis",
             ref: (node) => {
               sectionRefs.current.analysis = node;
             },
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                className: "panel kpi-grid",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                    className: "kpi",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
-                        children: stats.day.total
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                        children: "当日ログ数"
+            children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+              className: "islands",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                  className: "panel island kpi-grid",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
+                      className: "kpi",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
+                          children: stats.day.total
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                          children: "当日ログ数"
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
+                      className: "kpi",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
+                          children: avg
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                          children: "平均 Effort"
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
+                      className: "guide",
+                      children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                        children: "時系列で負荷を追い、次のマイルストーン配分を決める"
                       }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                    className: "kpi",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
-                        children: avg
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                        children: "平均 Effort"
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                    className: "guide",
-                    children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                      children: "時系列で負荷を追い、次のマイルストーン配分を決める"
                     }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                className: "panel chart-grid",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
-                    series: [
-                      {
-                        type: "bar",
-                        x: stats.weekly.map((row) => row.date_key),
-                        y: stats.weekly.map((row) => row.count),
-                        marker: { color: "#1fbf75" }
-                      }
-                    ],
-                    layout: { title: "過去7日ログ数", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
-                    series: [
-                      {
-                        type: "scatter",
-                        mode: "lines+markers",
-                        x: stats.by_hour.map((row) => row.hour_key),
-                        y: stats.by_hour.map((row) => row.avg_effort),
-                        line: { color: "#67d6ff", width: 3 }
-                      }
-                    ],
-                    layout: {
-                      title: "時間帯別 average effort",
-                      paper_bgcolor: "transparent",
-                      plot_bgcolor: "transparent",
-                      font: { color: "#c6d1de" }
-                    }
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                  className: "panel island wide chart-grid",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
+                      series: [{ type: "bar", x: stats.weekly.map((r) => r.date_key), y: stats.weekly.map((r) => r.count), marker: { color: "#1fbf75" } }],
+                      layout: { title: "過去7日ログ数", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
+                      series: [
+                        {
+                          type: "scatter",
+                          mode: "lines+markers",
+                          x: stats.by_hour.map((r) => r.hour_key),
+                          y: stats.by_hour.map((r) => r.avg_effort),
+                          line: { color: "#67d6ff", width: 3 }
+                        }
+                      ],
+                      layout: { title: "時間帯別 average effort", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
           /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
             className: "snap-section",
             "data-section": "edit",
@@ -17453,7 +17533,7 @@ function App() {
               sectionRefs.current.edit = node;
             },
             children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-              className: "panel",
+              className: "panel island wide",
               children: [
                 /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h3", {
                   children: "ログ一覧（edit done）"
@@ -17485,6 +17565,9 @@ function App() {
                               children: "Note"
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                              children: "Edit"
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
                               children: "Action"
                             }, undefined, false, undefined, this)
                           ]
@@ -17498,38 +17581,46 @@ function App() {
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
                               children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                                disabled: row.edit_done === 1,
                                 defaultValue: row.date_key,
-                                onChange: (event) => setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], date_key: event.target.value } }))
+                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], date_key: e.target.value } }))
                               }, undefined, false, undefined, this)
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
                               children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                                disabled: row.edit_done === 1,
                                 type: "number",
                                 min: "0",
                                 max: "23",
                                 defaultValue: row.hour_key,
-                                onChange: (event) => setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], hour_key: Number(event.target.value) } }))
+                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], hour_key: Number(e.target.value) } }))
                               }, undefined, false, undefined, this)
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
                               children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                                disabled: row.edit_done === 1,
                                 type: "number",
-                                min: "1",
-                                max: "5",
+                                min: "0",
+                                max: "100",
                                 defaultValue: row.effort,
-                                onChange: (event) => setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], effort: Number(event.target.value) } }))
+                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], effort: Number(e.target.value) } }))
                               }, undefined, false, undefined, this)
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
                               children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                                disabled: row.edit_done === 1,
                                 defaultValue: row.note ?? "",
-                                onChange: (event) => setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], note: event.target.value } }))
+                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], note: e.target.value } }))
                               }, undefined, false, undefined, this)
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                              children: row.edit_done === 1 ? "done" : "before"
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
                               className: "actions",
                               children: [
                                 /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                                  disabled: row.edit_done === 1,
                                   onClick: () => saveRow(row.id),
                                   children: "保存"
                                 }, undefined, false, undefined, this),
@@ -17550,7 +17641,17 @@ function App() {
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this)
         ]
-      }, undefined, true, undefined, this)
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("nav", {
+        className: "section-indicator bottom",
+        "aria-label": "section navigation",
+        children: SECTION_ORDER.map((section) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+          className: activeSection === section ? "dot active" : "dot",
+          onClick: () => jumpToSection(section),
+          title: section,
+          "aria-label": section
+        }, section, false, undefined, this))
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }

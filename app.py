@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import os
 from pathlib import Path
 import sqlite3
 
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
-DB_PATH = Path("data/dash.db")
+DB_PATH = Path(os.getenv("DASH_DB_PATH", "data/dash.db"))
 FRONTEND_DIR = Path("frontend")
 
 
@@ -35,24 +36,85 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date_key TEXT NOT NULL,
                 hour_key INTEGER NOT NULL,
-                effort INTEGER NOT NULL CHECK(effort BETWEEN 1 AND 5),
+                effort INTEGER NOT NULL CHECK(effort BETWEEN 0 AND 100),
                 note TEXT,
+                edit_done INTEGER NOT NULL DEFAULT 0 CHECK(edit_done IN (0, 1)),
                 created_at TEXT DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT DEFAULT (datetime('now', 'localtime'))
             )
             """
         )
+        ensure_effort_logs_columns(conn)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS impressive_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_log_id INTEGER,
+                title TEXT NOT NULL,
+                effort INTEGER NOT NULL CHECK(effort BETWEEN 0 AND 100),
+                note TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+            """
+        )
+        seed_impressive_tasks(conn)
+        auto_close_stale_edits(conn)
+
+
+def ensure_effort_logs_columns(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(effort_logs)").fetchall()}
+    if "edit_done" not in cols:
+        conn.execute(
+            """
+            ALTER TABLE effort_logs
+            ADD COLUMN edit_done INTEGER NOT NULL DEFAULT 0 CHECK(edit_done IN (0, 1))
+            """
+        )
+
+
+def auto_close_stale_edits(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE effort_logs
+        SET edit_done = 1, updated_at = datetime('now', 'localtime')
+        WHERE edit_done = 0
+          AND datetime(created_at) <= datetime('now', '-7 days')
+        """
+    )
+
+
+def seed_impressive_tasks(conn: sqlite3.Connection) -> None:
+    exists = conn.execute("SELECT COUNT(*) AS c FROM impressive_tasks").fetchone()["c"]
+    if exists > 0:
+        return
+    rows = conn.execute(
+        """
+        SELECT id, effort, note, date_key, hour_key
+        FROM effort_logs
+        ORDER BY effort DESC, date_key DESC, hour_key DESC
+        LIMIT 3
+        """
+    ).fetchall()
+    for row in rows:
+        title = f"Past Win {row['date_key']} {int(row['hour_key']):02d}:00"
+        conn.execute(
+            """
+            INSERT INTO impressive_tasks (source_log_id, title, effort, note)
+            VALUES (?, ?, ?, ?)
+            """,
+            [row["id"], title, row["effort"], row["note"]],
+        )
 
 
 class CreateEffortLog(BaseModel):
-    effort: int = Field(ge=1, le=5)
+    effort: int = Field(ge=0, le=100)
     note: str | None = None
 
 
 class UpdateEffortLog(BaseModel):
     date_key: str
     hour_key: int = Field(ge=0, le=23)
-    effort: int = Field(ge=1, le=5)
+    effort: int = Field(ge=0, le=100)
     note: str | None = None
 
 
@@ -83,6 +145,13 @@ def get_time() -> dict:
     return {"date_key": date_key, "hour_key": hour_key, "updated_at": datetime.now().isoformat()}
 
 
+@app.get("/api/latest-date")
+def get_latest_date() -> dict:
+    with get_conn() as conn:
+        row = conn.execute("SELECT COALESCE(MAX(date_key), date('now','localtime')) AS latest_date FROM effort_logs").fetchone()
+    return {"latest_date": row["latest_date"]}
+
+
 @app.post("/api/efforts")
 def create_effort(payload: CreateEffortLog) -> dict:
     date_key, hour_key = now_keys()
@@ -101,9 +170,10 @@ def create_effort(payload: CreateEffortLog) -> dict:
 @app.get("/api/efforts")
 def list_efforts(date: str) -> list[dict]:
     with get_conn() as conn:
+        auto_close_stale_edits(conn)
         rows = conn.execute(
             """
-            SELECT id, date_key, hour_key, effort, note, created_at, updated_at
+            SELECT id, date_key, hour_key, effort, note, edit_done, created_at, updated_at
             FROM effort_logs
             WHERE date_key = ?
             ORDER BY hour_key DESC, id DESC
@@ -116,13 +186,16 @@ def list_efforts(date: str) -> list[dict]:
 @app.patch("/api/efforts/{log_id}")
 def update_effort(log_id: int, payload: UpdateEffortLog) -> dict:
     with get_conn() as conn:
-        exists = conn.execute("SELECT id FROM effort_logs WHERE id = ?", [log_id]).fetchone()
+        auto_close_stale_edits(conn)
+        exists = conn.execute("SELECT id, edit_done FROM effort_logs WHERE id = ?", [log_id]).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Log not found")
+        if int(exists["edit_done"]) == 1:
+            raise HTTPException(status_code=403, detail="Edit is locked for this log")
         conn.execute(
             """
             UPDATE effort_logs
-            SET date_key = ?, hour_key = ?, effort = ?, note = ?, updated_at = datetime('now', 'localtime')
+            SET date_key = ?, hour_key = ?, effort = ?, note = ?, edit_done = 1, updated_at = datetime('now', 'localtime')
             WHERE id = ?
             """,
             [payload.date_key, payload.hour_key, payload.effort, payload.note, log_id],
@@ -143,6 +216,7 @@ def remove_effort(log_id: int) -> dict:
 @app.get("/api/stats")
 def get_stats(date: str) -> dict:
     with get_conn() as conn:
+        auto_close_stale_edits(conn)
         day = conn.execute(
             """
             SELECT COUNT(*) AS total, ROUND(AVG(effort), 2) AS avg_effort
@@ -176,3 +250,17 @@ def get_stats(date: str) -> dict:
         "weekly": [dict(row) for row in weekly],
         "by_hour": [dict(row) for row in by_hour],
     }
+
+
+@app.get("/api/impressive-tasks")
+def list_impressive_tasks() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, source_log_id, title, effort, note, created_at
+            FROM impressive_tasks
+            ORDER BY effort DESC, id DESC
+            LIMIT 5
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]

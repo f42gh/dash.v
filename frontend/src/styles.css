@@ -19,13 +19,25 @@ body {
   overflow: hidden;
 }
 
-.page { max-width: 1200px; margin: 0 auto; padding: 20px 28px; height: 100vh; display: grid; grid-template-rows: auto auto 1fr; gap: 12px; }
+.page { max-width: 1280px; margin: 0 auto; padding: 12px 16px; height: 100vh; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
 .hero { display: flex; justify-content: space-between; align-items: end; }
-h1 { margin: 0; font-size: 42px; letter-spacing: 0.5px; }
+h1 { margin: 0; font-size: 36px; letter-spacing: 0.3px; }
 .sub { margin-top: 6px; color: var(--muted); }
 .clock { color: var(--accent2); font-weight: 600; }
 
 .section-indicator { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.section-indicator.bottom {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 50;
+  background: rgba(8, 16, 28, 0.55);
+  border: 1px solid #2b4a70;
+  border-radius: 999px;
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+}
 .dot {
   width: 12px; height: 12px; border-radius: 50%;
   border: 1px solid #4d6b8f; background: transparent; cursor: pointer; padding: 0;
@@ -45,17 +57,79 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 0.5px; }
   scroll-snap-stop: always;
   display: grid;
   align-content: start;
-  gap: 14px;
-  padding-top: 4px;
+  gap: 10px;
+  padding-top: 2px;
 }
 
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 16px;
-  margin-bottom: 14px;
+  padding: 12px;
+  margin: 0;
   backdrop-filter: blur(3px);
+}
+
+.islands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.island {
+  flex: 1 1 320px;
+  min-width: 280px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.island.wide {
+  flex: 2 1 620px;
+}
+
+.island-compact {
+  flex: 0 1 auto;
+  min-width: 220px;
+}
+
+.input-stack {
+  display: grid;
+  gap: 8px;
+  width: min(380px, 100%);
+}
+
+.action-island {
+  display: grid;
+  align-content: end;
+  min-width: 180px;
+}
+
+.action-island .accent {
+  width: 100%;
+}
+
+.dopamine-submit {
+  width: 100%;
+  min-height: 58px;
+  font-size: 18px;
+  letter-spacing: 0.4px;
+  border-radius: 14px;
+  border: 1px solid #47f0ab;
+  background: linear-gradient(140deg, #4affb6, #25d084 42%, #14b86d 100%);
+  box-shadow: 0 8px 28px rgba(31, 191, 117, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+
+.dopamine-submit:hover {
+  transform: translateY(-1px) scale(1.01);
+  filter: saturate(1.08);
+  box-shadow: 0 12px 36px rgba(31, 191, 117, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.dopamine-submit:active {
+  transform: translateY(1px) scale(0.995);
+  box-shadow: 0 4px 14px rgba(31, 191, 117, 0.45), inset 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .input-panel { display: grid; grid-template-columns: 180px 1fr 1fr auto; gap: 12px; align-items: end; }
@@ -75,6 +149,61 @@ input {
   border: none; border-radius: 12px; padding: 12px 16px; cursor: pointer;
   background: linear-gradient(135deg, #1fbf75, #0d9157); color: #00150b; font-weight: 700;
 }
+.muted { color: var(--muted); }
+
+.effort-field { align-items: start; }
+.pile-wrap { display: grid; justify-items: center; gap: 8px; }
+.pile-number {
+  font-size: 38px;
+  font-weight: 800;
+  color: #b7ffdd;
+  text-shadow: 0 0 18px rgba(31, 191, 117, 0.35);
+}
+.pile {
+  display: grid;
+  grid-template-rows: repeat(10, 20px);
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #2a4a6f;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(12, 25, 42, 0.8), rgba(6, 15, 28, 0.95));
+}
+.pile-block {
+  width: 86px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid #28466b;
+  background: rgba(10, 26, 46, 0.8);
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.pile-block.on {
+  background: linear-gradient(90deg, #1fbf75, #37e79a);
+  box-shadow: 0 0 12px rgba(55, 231, 154, 0.35);
+  transform: translateY(-1px);
+}
+.pile-wrap input[type="range"] { width: 220px; }
+
+.impressive-panel { display: grid; gap: 10px; }
+.impressive-focus {
+  border: 1px solid #2d577f;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(18, 39, 63, 0.75);
+  display: grid;
+  gap: 4px;
+}
+.impressive-focus span { color: #9ff3c8; font-weight: 700; }
+.impressive-focus p { margin: 0; color: var(--muted); }
+.impressive-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.impressive-card {
+  border: 1px solid #264462;
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(10, 24, 39, 0.75);
+}
+.impressive-card header { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.impressive-card span { color: #67d6ff; font-weight: 700; }
+.impressive-card p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 
 .kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .kpi { border: 1px solid #24415f; border-radius: 12px; padding: 12px; }
@@ -88,7 +217,7 @@ input {
 
 .table-wrap { overflow: auto; }
 table { width: 100%; border-collapse: collapse; }
-th, td { border-bottom: 1px solid #203856; text-align: left; padding: 8px; }
+th, td { border-bottom: 1px solid #203856; text-align: left; padding: 6px; }
 th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
 td input { width: 100%; }
 .actions { display: flex; gap: 8px; }
@@ -101,10 +230,13 @@ button.ghost { background: transparent; color: #f9a4a4; border-color: #6a2f37; }
 
 @media (max-width: 980px) {
   body { overflow: auto; height: auto; }
-  .page { height: auto; display: block; padding: 18px; }
+  .page { height: auto; display: block; padding: 12px; }
   .snap-container { height: auto; overflow: visible; scroll-snap-type: none; }
   .snap-section { min-height: auto; scroll-snap-align: none; }
-  .section-indicator { position: sticky; top: 10px; z-index: 20; background: rgba(8, 16, 28, 0.5); border-radius: 999px; padding: 8px 10px; width: fit-content; margin: 0 auto 10px; }
+  .section-indicator.bottom { position: sticky; top: 10px; bottom: auto; transform: none; left: auto; width: fit-content; margin: 0 auto 10px; }
+  .island, .island.wide { min-width: 0; flex: 1 1 100%; width: 100%; }
+  .input-stack { width: 100%; }
+  .impressive-list { grid-template-columns: 1fr; }
   .input-panel { grid-template-columns: 1fr; }
   .chart-grid, .kpi-grid { grid-template-columns: 1fr; }
   .hero { align-items: start; flex-direction: column; gap: 8px; }

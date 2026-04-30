@@ -1,30 +1,33 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 type SectionKey = "home" | "analysis" | "edit";
 
-type TimeResponse = {
-  date_key: string;
-  hour_key: number;
-  updated_at: string;
-};
-
+type TimeResponse = { date_key: string; hour_key: number; updated_at: string };
+type LatestDateResponse = { latest_date: string };
 type EffortLog = {
   id: number;
   date_key: string;
   hour_key: number;
   effort: number;
   note: string | null;
+  edit_done: number;
   created_at: string;
   updated_at: string;
 };
-
+type ImpressiveTask = {
+  id: number;
+  source_log_id: number | null;
+  title: string;
+  effort: number;
+  note: string | null;
+  created_at: string;
+};
 type StatsResponse = {
   day: { total: number; avg_effort: number | null };
   weekly: Array<{ date_key: string; count: number; avg_effort: number }>;
   by_hour: Array<{ hour_key: number; count: number; avg_effort: number }>;
 };
-
 type PlotlyLike = {
   react: (el: HTMLElement, data: unknown[], layout: Record<string, unknown>, config?: Record<string, unknown>) => void;
 };
@@ -37,13 +40,6 @@ declare global {
 
 const API = "";
 const SECTION_ORDER: SectionKey[] = ["home", "analysis", "edit"];
-const EFFORT_GUIDE = [
-  "1: 着手だけ。開始はしたが進捗はほぼ出ていない",
-  "2: 軽く進めた。確認や小タスクを完了",
-  "3: 1ブロック進捗。明確な1タスクを終えた",
-  "4: 明確に前進。難所突破または複数タスク完了",
-  "5: 節目を突破。マイルストーンを1つ前進",
-];
 
 function todayKey() {
   const now = new Date();
@@ -60,12 +56,39 @@ function Plot(props: { series: unknown[]; layout: Record<string, unknown> }) {
   return <div className="plot" ref={ref} />;
 }
 
+function EffortPile(props: { value: number; onChange: (v: number) => void }) {
+  const steps = 10;
+  const active = Math.round(props.value / 10);
+  return (
+    <div className="pile-wrap">
+      <div className="pile-number">{props.value}</div>
+      <div className="pile" role="slider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={props.value}>
+        {Array.from({ length: steps }).map((_, i) => {
+          const level = steps - i;
+          const fill = level <= active;
+          return (
+            <button
+              key={level}
+              type="button"
+              className={fill ? "pile-block on" : "pile-block"}
+              onClick={() => props.onChange(level * 10)}
+              title={`${level * 10}`}
+            />
+          );
+        })}
+      </div>
+      <input type="range" min="0" max="100" step="1" value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} />
+    </div>
+  );
+}
+
 function App() {
   const [dateKey, setDateKey] = useState(todayKey());
   const [clock, setClock] = useState("");
-  const [effort, setEffort] = useState(3);
+  const [effort, setEffort] = useState(60);
   const [note, setNote] = useState("");
   const [logs, setLogs] = useState<EffortLog[]>([]);
+  const [impressive, setImpressive] = useState<ImpressiveTask[]>([]);
   const [stats, setStats] = useState<StatsResponse>({ day: { total: 0, avg_effort: null }, weekly: [], by_hour: [] });
   const [message, setMessage] = useState("");
   const [editRows, setEditRows] = useState<Record<number, Partial<EffortLog>>>({});
@@ -73,18 +96,42 @@ function App() {
   const noteInputRef = useRef<HTMLInputElement>(null);
   const snapContainerRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Record<SectionKey, HTMLElement | null>>({ home: null, analysis: null, edit: null });
+  const initializedDateRef = useRef(false);
+
+  const nearestImpressive = useMemo(() => {
+    if (impressive.length === 0) return null;
+    const sorted = [...impressive].sort((a, b) => Math.abs(a.effort - effort) - Math.abs(b.effort - effort));
+    return sorted[0];
+  }, [impressive, effort]);
 
   async function refresh() {
-    const [timeRes, logsRes, statsRes] = await Promise.all([
+    const [timeRes, logsRes, statsRes, impressiveRes] = await Promise.all([
       fetch(`${API}/api/time`),
       fetch(`${API}/api/efforts?date=${dateKey}`),
       fetch(`${API}/api/stats?date=${dateKey}`),
+      fetch(`${API}/api/impressive-tasks`),
     ]);
     const time = (await timeRes.json()) as TimeResponse;
     setClock(`${time.date_key} ${String(time.hour_key).padStart(2, "0")}:00`);
     setLogs((await logsRes.json()) as EffortLog[]);
     setStats((await statsRes.json()) as StatsResponse);
+    setImpressive((await impressiveRes.json()) as ImpressiveTask[]);
   }
+
+  async function bootstrapDate() {
+    if (initializedDateRef.current) return;
+    initializedDateRef.current = true;
+    const res = await fetch(`${API}/api/latest-date`);
+    if (!res.ok) return;
+    const data = (await res.json()) as LatestDateResponse;
+    if (data.latest_date && data.latest_date !== dateKey) {
+      setDateKey(data.latest_date);
+    }
+  }
+
+  useEffect(() => {
+    bootstrapDate();
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -100,12 +147,10 @@ function App() {
     if (!root) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        const inView = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        const inView = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
         if (inView.length === 0) return;
-        const sectionName = inView[0].target.getAttribute("data-section") as SectionKey | null;
-        if (sectionName) setActiveSection(sectionName);
+        const name = inView[0].target.getAttribute("data-section") as SectionKey | null;
+        if (name) setActiveSection(name);
       },
       { root, threshold: [0.55, 0.75] },
     );
@@ -117,8 +162,7 @@ function App() {
   }, []);
 
   function jumpToSection(section: SectionKey) {
-    const node = sectionRefs.current[section];
-    if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+    sectionRefs.current[section]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function addLog() {
@@ -140,6 +184,10 @@ function App() {
     if (!patch) return;
     const row = logs.find((item) => item.id === id);
     if (!row) return;
+    if (row.edit_done === 1) {
+      setMessage(`ID ${id} は編集ロック済みです`);
+      return;
+    }
     const body = {
       date_key: patch.date_key ?? row.date_key,
       hour_key: Number(patch.hour_key ?? row.hour_key),
@@ -151,7 +199,12 @@ function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    setMessage(res.ok ? `ID ${id} を更新しました` : `ID ${id} の更新に失敗しました`);
+    if (res.status === 403) {
+      setMessage(`ID ${id} は編集可能期間を過ぎたためロックされています`);
+      await refresh();
+      return;
+    }
+    setMessage(res.ok ? `ID ${id} を更新しました（このログは編集完了になりました）` : `ID ${id} の更新に失敗しました`);
     if (res.ok) {
       setEditRows((prev) => {
         const next = { ...prev };
@@ -186,18 +239,6 @@ function App() {
         <div className="clock">{clock} / 10分ごと自動更新</div>
       </header>
 
-      <nav className="section-indicator" aria-label="section navigation">
-        {SECTION_ORDER.map((section) => (
-          <button
-            key={section}
-            className={activeSection === section ? "dot active" : "dot"}
-            onClick={() => jumpToSection(section)}
-            title={section}
-            aria-label={section}
-          />
-        ))}
-      </nav>
-
       <div className="snap-container" ref={snapContainerRef}>
         <section
           className="snap-section"
@@ -206,37 +247,56 @@ function App() {
             sectionRefs.current.home = node;
           }}
         >
-          <div className="panel input-panel">
-            <div className="field">
-              <label>記録日</label>
-              <input type="date" value={dateKey} onChange={(event) => setDateKey(event.target.value)} />
+          <div className="islands">
+            <div className="panel island island-compact input-stack">
+              <div className="field">
+                <label>記録日</label>
+                <input type="date" value={dateKey} onChange={(event) => setDateKey(event.target.value)} />
+              </div>
+              <div className="field">
+                <label>メモ（任意）</label>
+                <input
+                  ref={noteInputRef}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  onKeyDown={onQuickSubmit}
+                  placeholder="あとで見返す一言（Enterで記録）"
+                />
+              </div>
+              <button className="accent dopamine-submit" onClick={addLog}>
+                Stack This Effort
+              </button>
             </div>
-            <div className="field grow">
-              <label>Effort (1-5)</label>
-              <input type="range" min="1" max="5" value={effort} onChange={(event) => setEffort(Number(event.target.value))} />
-              <div className="effort-value">{effort}</div>
+
+            <div className="panel island island-compact effort-field">
+              <label>Effort (0-100)</label>
+              <EffortPile value={effort} onChange={setEffort} />
             </div>
-            <div className="field grow">
-              <label>メモ（任意）</label>
-              <input
-                ref={noteInputRef}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                onKeyDown={onQuickSubmit}
-                placeholder="あとで見返す一言（Enterで記録）"
-              />
+
+            <div className="panel island impressive-panel">
+              <h3>Impressive Baseline</h3>
+              <p className="muted">過去の impressive task を基準に、今日の effort をチューニングする</p>
+              {nearestImpressive ? (
+                <div className="impressive-focus">
+                  <strong>{nearestImpressive.title}</strong>
+                  <span>{nearestImpressive.effort} / 100</span>
+                  <p>{nearestImpressive.note ?? "記録なし"}</p>
+                </div>
+              ) : (
+                <p className="muted">impressive task がまだありません。</p>
+              )}
+              <div className="impressive-list">
+                {impressive.map((task) => (
+                  <article key={task.id} className="impressive-card">
+                    <header>
+                      <strong>{task.title}</strong>
+                      <span>{task.effort}</span>
+                    </header>
+                    <p>{task.note ?? "記録なし"}</p>
+                  </article>
+                ))}
+              </div>
             </div>
-            <button className="accent" onClick={addLog}>
-              今の努力量を記録
-            </button>
-          </div>
-          <div className="panel effort-guide">
-            <h3>Effort運用基準（固定）</h3>
-            <ul>
-              {EFFORT_GUIDE.map((row) => (
-                <li key={row}>{row}</li>
-              ))}
-            </ul>
           </div>
         </section>
 
@@ -247,49 +307,38 @@ function App() {
             sectionRefs.current.analysis = node;
           }}
         >
-          <div className="panel kpi-grid">
-            <article className="kpi">
-              <h2>{stats.day.total}</h2>
-              <p>当日ログ数</p>
-            </article>
-            <article className="kpi">
-              <h2>{avg}</h2>
-              <p>平均 Effort</p>
-            </article>
-            <article className="guide">
-              <p>時系列で負荷を追い、次のマイルストーン配分を決める</p>
-            </article>
-          </div>
-
-          <div className="panel chart-grid">
-            <Plot
-              series={[
-                {
-                  type: "bar",
-                  x: stats.weekly.map((row) => row.date_key),
-                  y: stats.weekly.map((row) => row.count),
-                  marker: { color: "#1fbf75" },
-                },
-              ]}
-              layout={{ title: "過去7日ログ数", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }}
-            />
-            <Plot
-              series={[
-                {
-                  type: "scatter",
-                  mode: "lines+markers",
-                  x: stats.by_hour.map((row) => row.hour_key),
-                  y: stats.by_hour.map((row) => row.avg_effort),
-                  line: { color: "#67d6ff", width: 3 },
-                },
-              ]}
-              layout={{
-                title: "時間帯別 average effort",
-                paper_bgcolor: "transparent",
-                plot_bgcolor: "transparent",
-                font: { color: "#c6d1de" },
-              }}
-            />
+          <div className="islands">
+            <div className="panel island kpi-grid">
+              <article className="kpi">
+                <h2>{stats.day.total}</h2>
+                <p>当日ログ数</p>
+              </article>
+              <article className="kpi">
+                <h2>{avg}</h2>
+                <p>平均 Effort</p>
+              </article>
+              <article className="guide">
+                <p>時系列で負荷を追い、次のマイルストーン配分を決める</p>
+              </article>
+            </div>
+            <div className="panel island wide chart-grid">
+              <Plot
+                series={[{ type: "bar", x: stats.weekly.map((r) => r.date_key), y: stats.weekly.map((r) => r.count), marker: { color: "#1fbf75" } }]}
+                layout={{ title: "過去7日ログ数", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }}
+              />
+              <Plot
+                series={[
+                  {
+                    type: "scatter",
+                    mode: "lines+markers",
+                    x: stats.by_hour.map((r) => r.hour_key),
+                    y: stats.by_hour.map((r) => r.avg_effort),
+                    line: { color: "#67d6ff", width: 3 },
+                  },
+                ]}
+                layout={{ title: "時間帯別 average effort", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }}
+              />
+            </div>
           </div>
         </section>
 
@@ -300,68 +349,26 @@ function App() {
             sectionRefs.current.edit = node;
           }}
         >
-          <div className="panel">
+          <div className="panel island wide">
             <h3>ログ一覧（edit done）</h3>
             <p className="msg">{message}</p>
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Date</th>
-                    <th>Hour</th>
-                    <th>Effort</th>
-                    <th>Note</th>
-                    <th>Action</th>
-                  </tr>
+                  <tr><th>ID</th><th>Date</th><th>Hour</th><th>Effort</th><th>Note</th><th>Edit</th><th>Action</th></tr>
                 </thead>
                 <tbody>
                   {logs.map((row) => (
                     <tr key={row.id}>
                       <td>{row.id}</td>
-                      <td>
-                        <input
-                          defaultValue={row.date_key}
-                          onChange={(event) =>
-                            setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], date_key: event.target.value } }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          max="23"
-                          defaultValue={row.hour_key}
-                          onChange={(event) =>
-                            setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], hour_key: Number(event.target.value) } }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="1"
-                          max="5"
-                          defaultValue={row.effort}
-                          onChange={(event) =>
-                            setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], effort: Number(event.target.value) } }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          defaultValue={row.note ?? ""}
-                          onChange={(event) =>
-                            setEditRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], note: event.target.value } }))
-                          }
-                        />
-                      </td>
+                      <td><input disabled={row.edit_done === 1} defaultValue={row.date_key} onChange={(e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], date_key: e.target.value } }))} /></td>
+                      <td><input disabled={row.edit_done === 1} type="number" min="0" max="23" defaultValue={row.hour_key} onChange={(e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], hour_key: Number(e.target.value) } }))} /></td>
+                      <td><input disabled={row.edit_done === 1} type="number" min="0" max="100" defaultValue={row.effort} onChange={(e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], effort: Number(e.target.value) } }))} /></td>
+                      <td><input disabled={row.edit_done === 1} defaultValue={row.note ?? ""} onChange={(e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], note: e.target.value } }))} /></td>
+                      <td>{row.edit_done === 1 ? "done" : "before"}</td>
                       <td className="actions">
-                        <button onClick={() => saveRow(row.id)}>保存</button>
-                        <button className="ghost" onClick={() => deleteRow(row.id)}>
-                          削除
-                        </button>
+                        <button disabled={row.edit_done === 1} onClick={() => saveRow(row.id)}>保存</button>
+                        <button className="ghost" onClick={() => deleteRow(row.id)}>削除</button>
                       </td>
                     </tr>
                   ))}
@@ -371,6 +378,18 @@ function App() {
           </div>
         </section>
       </div>
+
+      <nav className="section-indicator bottom" aria-label="section navigation">
+        {SECTION_ORDER.map((section) => (
+          <button
+            key={section}
+            className={activeSection === section ? "dot active" : "dot"}
+            onClick={() => jumpToSection(section)}
+            title={section}
+            aria-label={section}
+          />
+        ))}
+      </nav>
     </main>
   );
 }
