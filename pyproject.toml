@@ -1,0 +1,11 @@
+[project]
+name = "dash-v"
+version = "0.1.0"
+description = "Personal analytics dashboard built with Plotly Dash and SQLite."
+requires-python = ">=3.10"
+dependencies = [
+  "dash>=2.18,<3.0",
+  "plotly>=5.24,<6.0",
+  "pandas>=2.2,<3.0",
+]
+

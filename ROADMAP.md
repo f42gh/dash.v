@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-04-30 追記: Plotly Dash 移行プラン
+
+> 方針: 現在の `dash.v`（Bun + React + SQLite）の機能を、TypeScript を使わず Python + Plotly Dash に段階移行する
+
+### Phase A: 最小移植（読み取り中心）
+1. Python 環境を用意し、`dash`, `plotly`, `pandas` を導入
+2. 既存 SQLite（`data/dash.db`）をそのまま利用
+3. Dash で以下を表示
+- 日付選択
+- エントリー一覧
+- 今日の件数・平均スコア
+- 過去7日ミニチャート
+- カテゴリ別集計
+
+### Phase B: 入力・更新機能の移植
+1. エントリー追加フォーム（title/category/score/note）
+2. エントリー削除
+3. 保存後に統計と一覧を同時更新（Dash callback）
+
+### Phase C: UX改善
+1. レイアウト整理（ヘッダー、KPIカード、チャート、一覧）
+2. カテゴリや期間のフィルタ追加
+3. 見た目調整（テーマ、余白、可読性）
+
+### Phase D: 運用整理
+1. 実行コマンド統一（`python app.py` など）
+2. README を現行構成に更新
+3. 旧 Bun/React 実装の扱いを決定
+- 並行運用（`src/` を保持）
+- 置換運用（Dash に一本化）
+
+### 先に決めておく事項
+- DB スキーマは現状維持（`entries` テーブル再利用）
+- API 層は作らず、Dash から SQLite を直接参照
+- 初期は単一ユーザー前提（認証なし）
+
+---
+
 ## Phase 1: 環境構築
 
 ### やること
