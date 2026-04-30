@@ -1,0 +1,64 @@
+# dash.v 作業ログ
+
+## 2026-03-10 — 初期セットアップ
+- `bun init` でプロジェクト作成（bun-react-tailwind テンプレート）
+- Hono + HTMX ベースのロードマップ（ROADMAP.md）を想定
+
+## 2026-03-11 — ロードマップ作成
+- ROADMAP.md を作成（Phase 1〜5 の開発計画）
+
+## 2026-03-12 — 構成変更・API実装
+- Hono + HTMX → Bun.serve + React に方針転換
+- SQLite（bun:sqlite）でエントリーDB（`src/db.ts`）を作成
+- API実装: `GET/POST /api/entries`, `DELETE /api/entries/:id`, `GET /api/stats`
+- React フロントエンド（`src/App.tsx`）で入力フォーム・一覧・統計UIを構築
+- ルートを `src/routes/` から `src/index.ts` にインライン化
+
+## 2026-03-29 — リポジトリ整理・リモート設定
+- GitHub リモートを `f42gh/dash.v` に変更し force push
+- 不要ファイルを削除:
+  - `build.ts` — Bun.serve の HTML imports で不要に
+  - `bun-env.d.ts` — SVG/CSS module 宣言、未使用
+  - `public/style.css` — 空ファイル
+  - `views/index.html` — 空ファイル（Hono時代の名残）
+  - `src/APITester.tsx`, `src/logo.svg`, `src/react.svg` — テンプレ残骸
+  - `src/routes/entries.ts`, `src/routes/stats.ts` — index.ts にインライン化済み
+- `hono` を dependencies から削除
+
+### ホーム画面リニューアル
+- レイアウトを3セクション構成に変更:
+  1. **ヘッダー**: 今日の日付 + タスク進捗 + タスク追加フォーム
+  2. **Eisenhower Matrix**: 2x2グリッド（Do First / Schedule / Delegate / Eliminate）
+  3. **Analytics**: エントリー統計・週次チャート・カテゴリ別（スクロール表示）
+- `tasks` テーブルを追加（urgent, important, done フラグ）
+- Task API: `GET/POST /api/tasks`, `PATCH/DELETE /api/tasks/:id`
+- App.tsx をコンポーネント分割（EisenhowerMatrix, TaskInput, Analytics）
+
+### Linear 連携
+- Linear GraphQL API 接続（Personal API key、`.env` で管理）
+- `src/linear.ts` — APIクライアント + Eisenhower マッピング
+  - Priority 1(Urgent)→Q1, 2(High)→Q2, 3(Medium)→Q3, 4(Low)/0→Q4
+- `/api/linear/issues` エンドポイント追加
+- Eisenhower Matrix にローカルタスク + Linear issue を統合表示
+  - ローカル: チェックボックス + 削除可
+  - Linear: ◆マーク + identifier + state 表示（読み取り専用）
+- Analytics に Linear サマリー追加（件数、Priority別・State別・Team別内訳、全issue一覧）
+
+## 2026-04-30 — Python化とフロント方針の再決定
+- Bun/React テンプレ由来の構成を整理し、Python中心に再編
+- 実装方針を `uv` ベースへ統一（依存同期・実行導線）
+- `effort_logs` を軸に、`date_key` と `hour_key` を分離保存するログモデルへ変更
+- 入力ハードル最小化のため、入力項目を実質 `effort` 中心へ絞り、後編集前提の運用へ
+
+### Reactフロント切り出し
+- UI/UXの重要度を再評価し、フロントを `frontend/` に分離
+- Python側は FastAPI API として責務を分離（`/api/time`, `/api/efforts`, `/api/stats`）
+- リッチUI（KPI、チャート、インライン編集）を React で実装
+
+### 重要な意思決定（Framework採用境界）
+- 当面は Next.js / Bun の導入を見送る
+- 理由:
+  - 現段階は機能探索とUX検証フェーズで、配信最適化より実験速度を優先
+  - 画面・状態管理の複雑度はまだ手動運用可能な範囲
+- 将来の導入トリガー:
+  - `project -> milestone -> issue/task` の3層UIが拡大し、ルーティング・キャッシュ・認証・SSR最適化が必要になった時

@@ -1,7 +1,7 @@
-# dash.v (Python MVP)
+# dash.v (FastAPI + React)
 
-Plotly Dash + SQLite で作る個人ダッシュボードです。  
-最小完成版として、エントリー追加・削除・日次統計・カテゴリ統計・7日チャートを提供します。
+FastAPI API + React UI + SQLite で構成した個人ダッシュボードです。  
+入力ハードルを下げつつ、分析と編集体験をリッチに保てる構成にしています。
 
 ## セットアップ
 
@@ -12,7 +12,7 @@ uv sync
 ## 起動
 
 ```bash
-uv run python app.py
+uv run uvicorn app:app --reload
 ```
 
 ブラウザで `http://127.0.0.1:8050` を開いて利用します。
@@ -20,4 +20,4 @@ uv run python app.py
 ## データ
 
 - SQLite: `data/dash.db`
-- テーブル: `entries`（起動時に自動作成）
+- テーブル: `effort_logs`（起動時に自動作成）
