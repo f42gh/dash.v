@@ -7,7 +7,7 @@ import sqlite3
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -190,8 +190,13 @@ def on_startup() -> None:
 
 
 @app.get("/")
-def root() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+def root() -> HTMLResponse:
+    # Cache-bust built assets: Cloudflare gives static files a 4h browser TTL.
+    html = (FRONTEND_DIR / "index.html").read_text()
+    for name in ("app.js", "styles.css"):
+        version = int((FRONTEND_DIR / "dist" / name).stat().st_mtime)
+        html = html.replace(f"/dist/{name}", f"/dist/{name}?v={version}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 def save_item(conn: sqlite3.Connection, item_id: int | None, p: ItemIn) -> int:
