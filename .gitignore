@@ -15,4 +15,5 @@ frontend/node_modules/
 
 # local data and notes
 data/
+backups/
 LOG.md
