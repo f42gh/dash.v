@@ -1,9 +1,3 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.mypy_cache/
-
 # dotenv environment variable files
 .env
 .env.*
@@ -11,9 +5,11 @@ __pycache__/
 # IDE and OS
 .idea/
 .DS_Store
-frontend/node_modules/
 
 # local data and notes
 data/
 backups/
 LOG.md
+.wrangler/
+frontend/dist/
+node_modules/

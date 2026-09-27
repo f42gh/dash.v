@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dash-v",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "build": { "command": "bun run build", "watch_dir": ["worker", "frontend/src", "frontend/index.html"] },
+  // index.html, app.js, styles.css; anything else (/api/*) falls through to the Worker
+  "assets": { "directory": "frontend/dist" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "dash-v", "database_id": "8d2ada87-c2bf-4fd9-8db7-e09bb46cdb99" }
+  ],
+  // Only reachable via the Access-protected custom domain
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "dash.candv.dev", "custom_domain": true }]
+}
