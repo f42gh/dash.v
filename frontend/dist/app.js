@@ -17118,540 +17118,813 @@ var require_jsx_dev_runtime = __commonJS((exports, module) => {
 var import_react = __toESM(require_react(), 1);
 var import_client = __toESM(require_client(), 1);
 var jsx_dev_runtime = __toESM(require_jsx_dev_runtime(), 1);
-var API = "";
-var SECTION_ORDER = ["home", "analysis", "edit"];
-function todayKey() {
-  const now = new Date;
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+var UNIT_LABEL = { day: "日", month: "月", year: "年" };
+var PER_MONTH = { day: 12 / 365, month: 1, year: 12 };
+var cycleLabel = (m) => m === 1 ? "毎月" : m === 12 ? "毎年" : `${m}ヶ月ごと`;
+var yen = (n) => `¥${Math.round(n).toLocaleString("ja-JP")}`;
+async function api(path, init) {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
+  if (!res.ok)
+    throw new Error(`${res.status} ${await res.text()}`);
+  return res.json();
 }
 function Plot(props) {
   const ref = import_react.useRef(null);
   import_react.useEffect(() => {
     if (ref.current && window.Plotly) {
-      window.Plotly.react(ref.current, props.series, props.layout, { displayModeBar: false, responsive: true });
+      window.Plotly.react(ref.current, props.data, props.layout, { displayModeBar: false, responsive: true });
     }
-  }, [props.series, props.layout]);
+  }, [props.data, props.layout]);
   return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
     className: "plot",
     ref
   }, undefined, false, undefined, this);
 }
-function EffortPile(props) {
-  const steps = 10;
-  const active = Math.round(props.value / 10);
-  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-    className: "pile-wrap",
+var today = () => new Date().toLocaleDateString("sv-SE");
+var emptyDraft = () => ({
+  name: "",
+  price: "",
+  purchased_on: today(),
+  lifespan: "",
+  lifespanUnit: "year",
+  retired_on: "",
+  tags: "",
+  note: "",
+  recurring: false
+});
+var toDraft = (i) => ({
+  name: i.name,
+  price: String(i.price),
+  purchased_on: i.purchased_on,
+  lifespan: i.lifespan_months % 12 === 0 ? String(i.lifespan_months / 12) : String(i.lifespan_months),
+  lifespanUnit: i.lifespan_months % 12 === 0 ? "year" : "month",
+  retired_on: i.retired_on ?? "",
+  tags: i.tags.join(", "),
+  note: i.note ?? "",
+  recurring: !!i.recurring
+});
+function ItemForm(props) {
+  const [d, setD] = import_react.useState(props.editing ? toDraft(props.editing) : emptyDraft());
+  const [error, setError] = import_react.useState("");
+  const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  import_react.useEffect(() => setD(props.editing ? toDraft(props.editing) : emptyDraft()), [props.editing]);
+  const months = Math.round(Number(d.lifespan) * (d.lifespanUnit === "year" ? 12 : 1));
+  const preview = Number(d.price) > 0 && months > 0 ? Number(d.price) / months : null;
+  async function submit(e) {
+    e.preventDefault();
+    const body = JSON.stringify({
+      name: d.name,
+      price: Number(d.price),
+      purchased_on: d.purchased_on,
+      lifespan_months: months,
+      retired_on: d.retired_on || null,
+      note: d.note || null,
+      tags: d.tags.split(/[,、]/).map((t) => t.trim()).filter(Boolean),
+      recurring: d.recurring
+    });
+    try {
+      if (props.editing)
+        await api(`/api/items/${props.editing.id}`, { method: "PUT", body });
+      else
+        await api("/api/items", { method: "POST", body });
+      setError("");
+      setD(emptyDraft());
+      props.onSaved();
+    } catch (err) {
+      setError(`保存できませんでした: ${err.message}`);
+    }
+  }
+  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("details", {
+    className: "add",
+    open: props.editing ? true : undefined,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        className: "pile-number",
-        children: props.value
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("summary", {
+        children: props.editing ? `編集中: ${props.editing.name}` : "物品を追加"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("form", {
+        className: "item-form",
+        onSubmit: submit,
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+            className: "form-grid",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  "名前",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    required: true,
+                    value: d.name,
+                    onChange: set("name"),
+                    placeholder: "MacBook Pro"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  d.recurring ? "料金（1回分・円）" : "価格（円）",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    required: true,
+                    type: "number",
+                    min: "0",
+                    value: d.price,
+                    onChange: set("price")
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  d.recurring ? "開始日" : "購入日",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    required: true,
+                    type: "date",
+                    value: d.purchased_on,
+                    onChange: set("purchased_on")
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  d.recurring ? "課金周期" : "耐用期間",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                    className: "inline",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                        required: true,
+                        type: "number",
+                        min: "1",
+                        step: "1",
+                        value: d.lifespan,
+                        onChange: set("lifespan")
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("select", {
+                        value: d.lifespanUnit,
+                        onChange: set("lifespanUnit"),
+                        children: [
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("option", {
+                            value: "year",
+                            children: "年"
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("option", {
+                            value: "month",
+                            children: "ヶ月"
+                          }, undefined, false, undefined, this)
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  "タグ（カンマ区切り）",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    list: "tag-options",
+                    value: d.tags,
+                    onChange: set("tags"),
+                    placeholder: "PC, 仕事"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("datalist", {
+                    id: "tag-options",
+                    children: props.tags.map((t) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("option", {
+                      value: t
+                    }, t, false, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  d.recurring ? "解約日（任意）" : "引退日（任意）",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "date",
+                    value: d.retired_on,
+                    onChange: set("retired_on")
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                className: "check",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "checkbox",
+                    checked: d.recurring,
+                    onChange: (e) => setD({ ...d, recurring: e.target.checked, ...e.target.checked && !d.lifespan ? { lifespan: "1", lifespanUnit: "month" } : {} })
+                  }, undefined, false, undefined, this),
+                  "サブスク（解約するまで毎周期課金）"
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                className: "wide",
+                children: [
+                  "メモ",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    value: d.note,
+                    onChange: set("note")
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+            className: "form-foot",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                className: "muted",
+                children: preview !== null ? `→ 月 ${yen(preview)} / 日 ${yen(preview * 12 / 365)}` : ""
+              }, undefined, false, undefined, this),
+              error && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                className: "error",
+                children: error
+              }, undefined, false, undefined, this),
+              props.editing && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                type: "button",
+                onClick: props.onCancel,
+                children: "キャンセル"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                className: "accent",
+                type: "submit",
+                children: props.editing ? "変更を保存" : "台帳に追加"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BudgetRow(props) {
+  const { row, unit } = props;
+  const [value, setValue] = import_react.useState(row.budget === null ? "" : String(row.budget));
+  import_react.useEffect(() => setValue(row.budget === null ? "" : String(row.budget)), [row.budget]);
+  const ratio = row.budget ? row.cost / row.budget : null;
+  const state = ratio === null ? "none" : ratio > 1 ? "over" : ratio > 0.8 ? "near" : "ok";
+  async function save() {
+    if (value === "")
+      await api(`/api/budgets/${encodeURIComponent(row.tag)}`, { method: "DELETE" });
+    else
+      await api(`/api/budgets/${encodeURIComponent(row.tag)}`, { method: "PUT", body: JSON.stringify({ monthly_limit: Number(value) }) });
+    props.onSaved();
+  }
+  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+    className: `budget-row ${props.active ? "picked" : ""}`,
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+        type: "button",
+        className: "tag-name",
+        onClick: props.onPick,
+        title: "このタグで絞り込む",
+        children: row.tag
       }, undefined, false, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        className: "pile",
-        role: "slider",
-        "aria-valuemin": 0,
-        "aria-valuemax": 100,
-        "aria-valuenow": props.value,
-        children: Array.from({ length: steps }).map((_, i) => {
-          const level = steps - i;
-          const fill = level <= active;
-          return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-            type: "button",
-            className: fill ? "pile-block on" : "pile-block",
-            onClick: () => props.onChange(level * 10),
-            title: `${level * 10}`
-          }, level, false, undefined, this);
-        })
+        className: "meter",
+        "aria-label": `${row.tag} 予算消化率`,
+        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+          className: `fill ${state}`,
+          style: { width: `${Math.min((ratio ?? 0) * 100, 100)}%` }
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+        className: "num",
+        children: yen(row.cost * PER_MONTH[unit])
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+        className: `badge ${state}`,
+        children: state === "over" ? "▲ 超過" : state === "near" ? "● 80%超" : state === "ok" ? `${Math.round((ratio ?? 0) * 100)}%` : "予算なし"
       }, undefined, false, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-        type: "range",
+        className: "budget-input",
+        type: "number",
         min: "0",
-        max: "100",
-        step: "1",
-        value: props.value,
-        onChange: (e) => props.onChange(Number(e.target.value))
+        placeholder: "月予算",
+        value,
+        onChange: (e) => setValue(e.target.value),
+        onBlur: () => value !== (row.budget === null ? "" : String(row.budget)) && save(),
+        onKeyDown: (e) => e.key === "Enter" && e.target.blur()
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 function App() {
-  const [dateKey, setDateKey] = import_react.useState(todayKey());
-  const [clock, setClock] = import_react.useState("");
-  const [effort, setEffort] = import_react.useState(60);
-  const [note, setNote] = import_react.useState("");
-  const [logs, setLogs] = import_react.useState([]);
-  const [impressive, setImpressive] = import_react.useState([]);
-  const [stats, setStats] = import_react.useState({ day: { total: 0, avg_effort: null }, weekly: [], by_hour: [] });
-  const [message, setMessage] = import_react.useState("");
-  const [editRows, setEditRows] = import_react.useState({});
-  const [activeSection, setActiveSection] = import_react.useState("home");
-  const noteInputRef = import_react.useRef(null);
-  const snapContainerRef = import_react.useRef(null);
-  const sectionRefs = import_react.useRef({ home: null, analysis: null, edit: null });
-  const initializedDateRef = import_react.useRef(false);
-  const nearestImpressive = import_react.useMemo(() => {
-    if (impressive.length === 0)
+  const [summary, setSummary] = import_react.useState(null);
+  const [items, setItems] = import_react.useState([]);
+  const [unit, setUnit] = import_react.useState("month");
+  const [editing, setEditing] = import_react.useState(null);
+  const [tagFilter, setTagFilter] = import_react.useState(null);
+  const [showRetired, setShowRetired] = import_react.useState(false);
+  const [error, setError] = import_react.useState("");
+  async function reload() {
+    try {
+      const [s, i] = await Promise.all([api("/api/summary"), api("/api/items")]);
+      setSummary(s);
+      setItems(i);
+      setError("");
+    } catch (err) {
+      setError(`読み込みに失敗しました: ${err.message}`);
+    }
+  }
+  import_react.useEffect(() => void reload(), []);
+  async function remove(item) {
+    if (!confirm(`「${item.name}」を削除しますか？`))
+      return;
+    await api(`/api/items/${item.id}`, { method: "DELETE" });
+    if (editing?.id === item.id)
+      setEditing(null);
+    reload();
+  }
+  const f = PER_MONTH[unit];
+  const allTags = import_react.useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
+  const visible = items.filter((i) => (showRetired || i.status !== "retired") && (!tagFilter || (tagFilter === "未分類" ? i.tags.length === 0 : i.tags.includes(tagFilter))));
+  const chart = import_react.useMemo(() => {
+    if (!summary)
       return null;
-    const sorted = [...impressive].sort((a, b) => Math.abs(a.effort - effort) - Math.abs(b.effort - effort));
-    return sorted[0];
-  }, [impressive, effort]);
-  async function refresh() {
-    const [timeRes, logsRes, statsRes, impressiveRes] = await Promise.all([
-      fetch(`${API}/api/time`),
-      fetch(`${API}/api/efforts?date=${dateKey}`),
-      fetch(`${API}/api/stats?date=${dateKey}`),
-      fetch(`${API}/api/impressive-tasks`)
-    ]);
-    const time = await timeRes.json();
-    setClock(`${time.date_key} ${String(time.hour_key).padStart(2, "0")}:00`);
-    setLogs(await logsRes.json());
-    setStats(await statsRes.json());
-    setImpressive(await impressiveRes.json());
-  }
-  async function bootstrapDate() {
-    if (initializedDateRef.current)
-      return;
-    initializedDateRef.current = true;
-    const res = await fetch(`${API}/api/latest-date`);
-    if (!res.ok)
-      return;
-    const data = await res.json();
-    if (data.latest_date && data.latest_date !== dateKey) {
-      setDateKey(data.latest_date);
+    const css = getComputedStyle(document.documentElement);
+    const token = (n) => css.getPropertyValue(n).trim();
+    const [ink, muted, rule, accent] = ["--ink", "--muted", "--rule", "--accent"].map(token);
+    const x = summary.timeline.map((t) => t.month);
+    const data = [
+      {
+        type: "bar",
+        x,
+        y: summary.timeline.map((t) => t.cost * f),
+        marker: { color: accent, opacity: x.map((m) => m > summary.month ? 0.3 : 1) },
+        hovertemplate: `%{x}<br>¥%{y:,.0f} / ${UNIT_LABEL[unit]}<extra></extra>`
+      }
+    ];
+    const shapes = [
+      { type: "line", xref: "x", yref: "paper", x0: summary.month, x1: summary.month, y0: 0, y1: 1, line: { color: muted, width: 1, dash: "dot" } }
+    ];
+    const annotations = [
+      { x: summary.month, y: 1, xref: "x", yref: "paper", text: "今月", showarrow: false, yanchor: "bottom", font: { color: muted, size: 11 } }
+    ];
+    if (summary.budget_total > 0) {
+      const y = summary.budget_total * f;
+      shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y, line: { color: ink, width: 1, dash: "dash" } });
+      annotations.push({ x: 1, xref: "paper", y, text: "予算合計", showarrow: false, xanchor: "right", yanchor: "bottom", font: { color: ink, size: 11 } });
     }
-  }
-  import_react.useEffect(() => {
-    bootstrapDate();
-  }, []);
-  import_react.useEffect(() => {
-    refresh();
-  }, [dateKey]);
-  import_react.useEffect(() => {
-    const timer = setInterval(refresh, 600000);
-    return () => clearInterval(timer);
-  }, [dateKey]);
-  import_react.useEffect(() => {
-    const root = snapContainerRef.current;
-    if (!root)
-      return;
-    const observer = new IntersectionObserver((entries) => {
-      const inView = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-      if (inView.length === 0)
-        return;
-      const name = inView[0].target.getAttribute("data-section");
-      if (name)
-        setActiveSection(name);
-    }, { root, threshold: [0.55, 0.75] });
-    SECTION_ORDER.forEach((key) => {
-      const node = sectionRefs.current[key];
-      if (node)
-        observer.observe(node);
-    });
-    return () => observer.disconnect();
-  }, []);
-  function jumpToSection(section) {
-    sectionRefs.current[section]?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  async function addLog() {
-    const res = await fetch(`${API}/api/efforts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ effort, note: note.trim() || null })
-    });
-    setMessage(res.ok ? "記録しました。必要なら下で編集してください。" : "記録に失敗しました。時間をおいて再試行してください。");
-    if (res.ok) {
-      setNote("");
-      await refresh();
-      noteInputRef.current?.focus();
-    }
-  }
-  async function saveRow(id) {
-    const patch = editRows[id];
-    if (!patch)
-      return;
-    const row = logs.find((item) => item.id === id);
-    if (!row)
-      return;
-    if (row.edit_done === 1) {
-      setMessage(`ID ${id} は編集ロック済みです`);
-      return;
-    }
-    const body = {
-      date_key: patch.date_key ?? row.date_key,
-      hour_key: Number(patch.hour_key ?? row.hour_key),
-      effort: Number(patch.effort ?? row.effort),
-      note: patch.note ?? row.note
+    const layout = {
+      height: 280,
+      margin: { l: 64, r: 32, t: 20, b: 32 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { color: muted, family: token("--font") },
+      xaxis: { type: "category", gridcolor: "rgba(0,0,0,0)", tickangle: 0, nticks: Math.max(3, Math.min(9, Math.floor(window.innerWidth / 130))) },
+      yaxis: { gridcolor: rule, zerolinecolor: rule, tickprefix: "¥", tickformat: ",.0f" },
+      bargap: 0.25,
+      shapes,
+      annotations
     };
-    const res = await fetch(`${API}/api/efforts/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    if (res.status === 403) {
-      setMessage(`ID ${id} は編集可能期間を過ぎたためロックされています`);
-      await refresh();
-      return;
-    }
-    setMessage(res.ok ? `ID ${id} を更新しました（このログは編集完了になりました）` : `ID ${id} の更新に失敗しました`);
-    if (res.ok) {
-      setEditRows((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      await refresh();
-    }
-  }
-  async function deleteRow(id) {
-    const res = await fetch(`${API}/api/efforts/${id}`, { method: "DELETE" });
-    setMessage(res.ok ? `ID ${id} を削除しました` : `ID ${id} の削除に失敗しました`);
-    if (res.ok)
-      await refresh();
-  }
-  async function onQuickSubmit(event) {
-    if (event.key !== "Enter")
-      return;
-    event.preventDefault();
-    await addLog();
-  }
-  const avg = stats.day.avg_effort == null ? "-" : stats.day.avg_effort;
-  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("main", {
+    return { data, layout };
+  }, [summary, f, unit]);
+  const hasHistory = summary?.timeline.some((t) => t.cost > 0);
+  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
     className: "page",
     children: [
       /* @__PURE__ */ jsx_dev_runtime.jsxDEV("header", {
-        className: "hero",
+        className: "masthead",
+        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+          className: "wordmark",
+          children: [
+            "dash.v ",
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+              className: "muted",
+              children: "持ち物台帳"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      error && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+        className: "alert",
+        role: "alert",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+          error,
+          " ",
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+            onClick: reload,
+            children: "再試行"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      !summary && !error && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+        className: "muted",
+        children: "読み込み中…"
+      }, undefined, false, undefined, this),
+      summary && /* @__PURE__ */ jsx_dev_runtime.jsxDEV(jsx_dev_runtime.Fragment, {
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
+            className: "total",
+            "aria-label": "今の負担",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h1", {
-                children: "dash.v"
-              }, undefined, false, undefined, this),
               /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                className: "sub",
-                children: "Track the trail, not just the result."
-              }, undefined, false, undefined, this)
+                className: "total-label",
+                children: [
+                  summary.month,
+                  " 時点で、持ち物の負担は"
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                className: "total-figure",
+                children: [
+                  yen(summary.monthly_total * f),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                    className: "per",
+                    children: [
+                      " / ",
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("select", {
+                        className: "unit-select",
+                        "aria-label": "表示単位",
+                        value: unit,
+                        onChange: (e) => setUnit(e.target.value),
+                        children: Object.keys(UNIT_LABEL).map((u) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("option", {
+                          value: u,
+                          children: UNIT_LABEL[u]
+                        }, u, false, undefined, this))
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dl", {
+                className: "facts",
+                children: [
+                  summary.budget_total > 0 && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    className: summary.monthly_total > summary.budget_total ? "over" : "",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dt", {
+                        children: "予算合計"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dd", {
+                        children: [
+                          yen(summary.budget_total * f),
+                          summary.monthly_total > summary.budget_total && " ▲超過"
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dt", {
+                        children: "サブスク"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dd", {
+                        children: [
+                          yen(summary.subscription_total * f),
+                          " ",
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                            className: "muted",
+                            children: [
+                              "（",
+                              summary.subscription_count,
+                              "件）"
+                            ]
+                          }, undefined, true, undefined, this)
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dt", {
+                        children: "残り簿価"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dd", {
+                        children: yen(summary.book_value)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dt", {
+                        children: "償却中"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dd", {
+                        children: [
+                          summary.active_count,
+                          "点"
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dt", {
+                        children: "償却済・使用中"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("dd", {
+                        children: [
+                          summary.paid_off_count,
+                          "点"
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
           /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-            className: "clock",
+            className: "split",
             children: [
-              clock,
-              " / 10分ごと自動更新"
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
+                    children: [
+                      "負担の推移 ",
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                        className: "muted",
+                        children: "過去12ヶ月・先12ヶ月"
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  hasHistory && chart ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
+                    data: chart.data,
+                    layout: chart.layout
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                    className: "muted",
+                    children: "物品を登録すると、ここに月ごとの負担が並びます。"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
+                    children: [
+                      "タグ別予算 ",
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                        className: "muted",
+                        children: "月額・Enterで保存"
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  summary.tags.length === 0 && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                    className: "muted",
+                    children: "タグを付けた物品を登録すると、ここで予算を設定できます。"
+                  }, undefined, false, undefined, this),
+                  summary.tags.map((row) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV(BudgetRow, {
+                    row,
+                    unit,
+                    active: tagFilter === row.tag,
+                    onPick: () => setTagFilter(tagFilter === row.tag ? null : row.tag),
+                    onSaved: reload
+                  }, row.tag, false, undefined, this)),
+                  summary.tags.length > 0 && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
+                    className: "muted small",
+                    children: "複数タグの物品は各タグに全額計上しています。"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          summary.ending_soon.length > 0 && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
+            className: "soon",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
+                children: "3ヶ月以内に償却終了"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("ul", {
+                children: summary.ending_soon.map((i) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("li", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("strong", {
+                      children: i.name
+                    }, undefined, false, undefined, this),
+                    " ",
+                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                      className: "muted",
+                      children: [
+                        i.ends_on,
+                        "まで（残り",
+                        i.months_left,
+                        "ヶ月）・買い替え積立の目安 ",
+                        yen(i.monthly_cost),
+                        "/月"
+                      ]
+                    }, undefined, true, undefined, this)
+                  ]
+                }, i.id, true, undefined, this))
+              }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        className: "snap-container",
-        ref: snapContainerRef,
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
+        className: "ledger",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
-            className: "snap-section",
-            "data-section": "home",
-            ref: (node) => {
-              sectionRefs.current.home = node;
-            },
-            children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-              className: "islands",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                  className: "panel island island-compact input-stack",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                      className: "field",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-                          children: "記録日"
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                          type: "date",
-                          value: dateKey,
-                          onChange: (event) => setDateKey(event.target.value)
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                      className: "field",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-                          children: "メモ（任意）"
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                          ref: noteInputRef,
-                          value: note,
-                          onChange: (event) => setNote(event.target.value),
-                          onKeyDown: onQuickSubmit,
-                          placeholder: "あとで見返す一言（Enterで記録）"
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-                      className: "accent dopamine-submit",
-                      onClick: addLog,
-                      children: "Stack This Effort"
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                  className: "panel island island-compact effort-field",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-                      children: "Effort (0-100)"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV(EffortPile, {
-                      value: effort,
-                      onChange: setEffort
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                  className: "panel island impressive-panel",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h3", {
-                      children: "Impressive Baseline"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                      className: "muted",
-                      children: "過去の impressive task を基準に、今日の effort をチューニングする"
-                    }, undefined, false, undefined, this),
-                    nearestImpressive ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                      className: "impressive-focus",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("strong", {
-                          children: nearestImpressive.title
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                          children: [
-                            nearestImpressive.effort,
-                            " / 100"
-                          ]
-                        }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                          children: nearestImpressive.note ?? "記録なし"
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                      className: "muted",
-                      children: "impressive task がまだありません。"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                      className: "impressive-list",
-                      children: impressive.map((task) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                        className: "impressive-card",
-                        children: [
-                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("header", {
-                            children: [
-                              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("strong", {
-                                children: task.title
-                              }, undefined, false, undefined, this),
-                              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                                children: task.effort
-                              }, undefined, false, undefined, this)
-                            ]
-                          }, undefined, true, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                            children: task.note ?? "記録なし"
-                          }, undefined, false, undefined, this)
-                        ]
-                      }, task.id, true, undefined, this))
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
-            className: "snap-section",
-            "data-section": "analysis",
-            ref: (node) => {
-              sectionRefs.current.analysis = node;
-            },
-            children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-              className: "islands",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                  className: "panel island kpi-grid",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                      className: "kpi",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
-                          children: stats.day.total
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                          children: "当日ログ数"
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                      className: "kpi",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
-                          children: avg
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                          children: "平均 Effort"
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV("article", {
-                      className: "guide",
-                      children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                        children: "時系列で負荷を追い、次のマイルストーン配分を決める"
-                      }, undefined, false, undefined, this)
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                  className: "panel island wide chart-grid",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
-                      series: [{ type: "bar", x: stats.weekly.map((r) => r.date_key), y: stats.weekly.map((r) => r.count), marker: { color: "#1fbf75" } }],
-                      layout: { title: "過去7日ログ数", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Plot, {
-                      series: [
-                        {
-                          type: "scatter",
-                          mode: "lines+markers",
-                          x: stats.by_hour.map((r) => r.hour_key),
-                          y: stats.by_hour.map((r) => r.avg_effort),
-                          line: { color: "#67d6ff", width: 3 }
-                        }
-                      ],
-                      layout: { title: "時間帯別 average effort", paper_bgcolor: "transparent", plot_bgcolor: "transparent", font: { color: "#c6d1de" } }
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("section", {
-            className: "snap-section",
-            "data-section": "edit",
-            ref: (node) => {
-              sectionRefs.current.edit = node;
-            },
-            children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-              className: "panel island wide",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h3", {
-                  children: "ログ一覧（edit done）"
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("p", {
-                  className: "msg",
-                  children: message
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-                  className: "table-wrap",
-                  children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("table", {
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+            className: "list-head",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h2", {
+                children: [
+                  "台帳 ",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                    className: "muted",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("thead", {
-                        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tr", {
-                          children: [
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "ID"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "Date"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "Hour"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "Effort"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "Note"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "Edit"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
-                              children: "Action"
-                            }, undefined, false, undefined, this)
-                          ]
-                        }, undefined, true, undefined, this)
+                      visible.length,
+                      "点"
+                    ]
+                  }, undefined, true, undefined, this),
+                  tagFilter && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                    className: "chip on",
+                    "aria-label": `${tagFilter}の絞り込みを解除`,
+                    onClick: () => setTagFilter(null),
+                    children: [
+                      tagFilter,
+                      " ×"
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                className: "muted small",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "checkbox",
+                    checked: showRetired,
+                    onChange: (e) => setShowRetired(e.target.checked)
+                  }, undefined, false, undefined, this),
+                  " 引退済みも表示"
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV(ItemForm, {
+            editing,
+            tags: allTags,
+            onSaved: () => {
+              setEditing(null);
+              reload();
+            },
+            onCancel: () => setEditing(null)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+            className: "table-wrap",
+            children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("table", {
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("thead", {
+                  children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tr", {
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        children: "名前"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tbody", {
-                        children: logs.map((row) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tr", {
-                          children: [
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              children: row.id
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                                disabled: row.edit_done === 1,
-                                defaultValue: row.date_key,
-                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], date_key: e.target.value } }))
-                              }, undefined, false, undefined, this)
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                                disabled: row.edit_done === 1,
-                                type: "number",
-                                min: "0",
-                                max: "23",
-                                defaultValue: row.hour_key,
-                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], hour_key: Number(e.target.value) } }))
-                              }, undefined, false, undefined, this)
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                                disabled: row.edit_done === 1,
-                                type: "number",
-                                min: "0",
-                                max: "100",
-                                defaultValue: row.effort,
-                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], effort: Number(e.target.value) } }))
-                              }, undefined, false, undefined, this)
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                                disabled: row.edit_done === 1,
-                                defaultValue: row.note ?? "",
-                                onChange: (e) => setEditRows((p) => ({ ...p, [row.id]: { ...p[row.id], note: e.target.value } }))
-                              }, undefined, false, undefined, this)
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              children: row.edit_done === 1 ? "done" : "before"
-                            }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
-                              className: "actions",
-                              children: [
-                                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-                                  disabled: row.edit_done === 1,
-                                  onClick: () => saveRow(row.id),
-                                  children: "保存"
-                                }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-                                  className: "ghost",
-                                  onClick: () => deleteRow(row.id),
-                                  children: "削除"
-                                }, undefined, false, undefined, this)
-                              ]
-                            }, undefined, true, undefined, this)
-                          ]
-                        }, row.id, true, undefined, this))
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        children: "タグ"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        className: "r",
+                        children: "価格"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        children: "購入"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        className: "r",
+                        children: "耐用"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        className: "r",
+                        children: [
+                          "/",
+                          UNIT_LABEL[unit]
+                        ]
+                      }, undefined, true, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        className: "wear-col",
+                        children: "使い込み・残り簿価"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("th", {
+                        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                          className: "sr-only",
+                          children: "操作"
+                        }, undefined, false, undefined, this)
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
-                }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tbody", {
+                  children: [
+                    visible.map((i) => {
+                      const used = i.price > 0 ? 1 - i.book_value / i.price : 1;
+                      return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tr", {
+                        className: i.status,
+                        children: [
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            children: [
+                              i.name,
+                              i.note && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                                className: "muted small",
+                                children: i.note
+                              }, undefined, false, undefined, this)
+                            ]
+                          }, undefined, true, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            children: i.tags.map((t) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                              className: "chip",
+                              onClick: () => setTagFilter(t),
+                              children: t
+                            }, t, false, undefined, this))
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            className: "r",
+                            children: yen(i.price)
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            className: "num",
+                            children: i.purchased_on.slice(0, 7)
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            className: "r",
+                            children: i.recurring ? cycleLabel(i.lifespan_months) : i.lifespan_months % 12 === 0 ? `${i.lifespan_months / 12}年` : `${i.lifespan_months}ヶ月`
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            className: "r",
+                            children: i.status === "active" ? yen(i.monthly_cost * f) : "—"
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            className: "wear-col",
+                            children: i.status === "retired" ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                              className: "muted small",
+                              children: [
+                                i.recurring ? "解約" : "引退",
+                                " ",
+                                i.retired_on?.slice(0, 7)
+                              ]
+                            }, undefined, true, undefined, this) : i.recurring ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                              className: "small sub",
+                              children: [
+                                "サブスク・継続中",
+                                i.retired_on && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                                  className: "muted",
+                                  children: [
+                                    " 〜",
+                                    i.retired_on.slice(0, 7),
+                                    "に解約"
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV(jsx_dev_runtime.Fragment, {
+                              children: [
+                                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                                  className: "wear",
+                                  role: "img",
+                                  "aria-label": `${Math.round(used * 100)}%使用`,
+                                  children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                                    style: { width: `${used * 100}%` }
+                                  }, undefined, false, undefined, this)
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                                  className: "small",
+                                  children: i.status === "paid_off" ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                                    className: "paid",
+                                    children: "償却済・使用中"
+                                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV(jsx_dev_runtime.Fragment, {
+                                    children: [
+                                      yen(i.book_value),
+                                      " ",
+                                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                                        className: "muted",
+                                        children: [
+                                          "〜",
+                                          i.ends_on
+                                        ]
+                                      }, undefined, true, undefined, this)
+                                    ]
+                                  }, undefined, true, undefined, this)
+                                }, undefined, false, undefined, this)
+                              ]
+                            }, undefined, true, undefined, this)
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                            className: "actions",
+                            children: [
+                              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                                onClick: () => {
+                                  setEditing(i);
+                                  requestAnimationFrame(() => document.querySelector(".add")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                                },
+                                children: "編集"
+                              }, undefined, false, undefined, this),
+                              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                                className: "danger",
+                                onClick: () => remove(i),
+                                children: "削除"
+                              }, undefined, false, undefined, this)
+                            ]
+                          }, undefined, true, undefined, this)
+                        ]
+                      }, i.id, true, undefined, this);
+                    }),
+                    visible.length === 0 && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("tr", {
+                      children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("td", {
+                        colSpan: 8,
+                        className: "muted",
+                        children: tagFilter ? "このタグの物品はありません。" : "まだ何もありません。「物品を追加」から最初の1点を登録してください。"
+                      }, undefined, false, undefined, this)
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this)
         ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("nav", {
-        className: "section-indicator bottom",
-        "aria-label": "section navigation",
-        children: SECTION_ORDER.map((section) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-          className: activeSection === section ? "dot active" : "dot",
-          onClick: () => jumpToSection(section),
-          title: section,
-          "aria-label": section
-        }, section, false, undefined, this))
-      }, undefined, false, undefined, this)
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }

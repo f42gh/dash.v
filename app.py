@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date
 import os
 from pathlib import Path
 import sqlite3
@@ -12,120 +12,175 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
-DB_PATH = Path(os.getenv("DASH_DB_PATH", "data/dash.db"))
-FRONTEND_DIR = Path("frontend")
-
-
-def now_keys() -> tuple[str, int]:
-    now = datetime.now()
-    return now.strftime("%Y-%m-%d"), now.hour
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = Path(os.getenv("DASH_DB_PATH", str(BASE_DIR / "data/dash.db"))).expanduser()
+FRONTEND_DIR = BASE_DIR / "frontend"
+UNTAGGED = "未分類"
 
 
 def get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
 def init_db() -> None:
     with get_conn() as conn:
-        conn.execute(
+        conn.executescript(
             """
-            CREATE TABLE IF NOT EXISTS effort_logs (
+            DROP TABLE IF EXISTS effort_logs;
+            DROP TABLE IF EXISTS impressive_tasks;
+            CREATE TABLE IF NOT EXISTS items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date_key TEXT NOT NULL,
-                hour_key INTEGER NOT NULL,
-                effort INTEGER NOT NULL CHECK(effort BETWEEN 0 AND 100),
-                note TEXT,
-                edit_done INTEGER NOT NULL DEFAULT 0 CHECK(edit_done IN (0, 1)),
-                created_at TEXT DEFAULT (datetime('now', 'localtime')),
-                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-            """
-        )
-        ensure_effort_logs_columns(conn)
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS impressive_tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_log_id INTEGER,
-                title TEXT NOT NULL,
-                effort INTEGER NOT NULL CHECK(effort BETWEEN 0 AND 100),
+                name TEXT NOT NULL,
+                price INTEGER NOT NULL CHECK(price >= 0),
+                purchased_on TEXT NOT NULL,
+                lifespan_months INTEGER NOT NULL CHECK(lifespan_months >= 1),
+                retired_on TEXT,
                 note TEXT,
                 created_at TEXT DEFAULT (datetime('now', 'localtime'))
-            )
+            );
+            CREATE TABLE IF NOT EXISTS item_tags (
+                item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                tag TEXT NOT NULL,
+                PRIMARY KEY (item_id, tag)
+            );
+            CREATE TABLE IF NOT EXISTS budgets (
+                tag TEXT PRIMARY KEY,
+                monthly_limit INTEGER NOT NULL CHECK(monthly_limit >= 0)
+            );
             """
         )
-        seed_impressive_tasks(conn)
-        auto_close_stale_edits(conn)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(items)")}
+        if "recurring" not in cols:
+            # recurring=1: subscription. price = fee per cycle, lifespan_months = billing cycle, retired_on = cancel date
+            conn.execute("ALTER TABLE items ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0")
 
 
-def ensure_effort_logs_columns(conn: sqlite3.Connection) -> None:
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(effort_logs)").fetchall()}
-    if "edit_done" not in cols:
-        conn.execute(
-            """
-            ALTER TABLE effort_logs
-            ADD COLUMN edit_done INTEGER NOT NULL DEFAULT 0 CHECK(edit_done IN (0, 1))
-            """
-        )
+# --- amortization (straight-line, month granularity) ---
+
+FOREVER = 10**9
 
 
-def auto_close_stale_edits(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        UPDATE effort_logs
-        SET edit_done = 1, updated_at = datetime('now', 'localtime')
-        WHERE edit_done = 0
-          AND datetime(created_at) <= datetime('now', '-7 days')
-        """
-    )
+def month_index(iso: str) -> int:
+    d = date.fromisoformat(iso)
+    return d.year * 12 + d.month - 1
 
 
-def seed_impressive_tasks(conn: sqlite3.Connection) -> None:
-    exists = conn.execute("SELECT COUNT(*) AS c FROM impressive_tasks").fetchone()["c"]
-    if exists > 0:
-        return
-    rows = conn.execute(
-        """
-        SELECT id, effort, note, date_key, hour_key
-        FROM effort_logs
-        ORDER BY effort DESC, date_key DESC, hour_key DESC
-        LIMIT 3
-        """
-    ).fetchall()
-    for row in rows:
-        title = f"Past Win {row['date_key']} {int(row['hour_key']):02d}:00"
-        conn.execute(
-            """
-            INSERT INTO impressive_tasks (source_log_id, title, effort, note)
-            VALUES (?, ?, ?, ?)
-            """,
-            [row["id"], title, row["effort"], row["note"]],
-        )
+def month_label(mi: int) -> str:
+    return f"{mi // 12:04d}-{mi % 12 + 1:02d}"
 
 
-class CreateEffortLog(BaseModel):
-    effort: int = Field(ge=0, le=100)
+def active_range(item: dict) -> tuple[int, int]:
+    """[start, end) months during which the item costs money."""
+    start = month_index(item["purchased_on"])
+    end = FOREVER if item["recurring"] else start + item["lifespan_months"]
+    if item["retired_on"]:
+        end = min(end, month_index(item["retired_on"]) + 1)
+    return start, end
+
+
+def monthly_cost(item: dict) -> float:
+    return item["price"] / item["lifespan_months"]
+
+
+def cost_in_month(item: dict, mi: int) -> float:
+    start, end = active_range(item)
+    return monthly_cost(item) if start <= mi < end else 0.0
+
+
+def enrich(item: dict, today_mi: int) -> dict:
+    start, end = active_range(item)
+    elapsed = min(max(today_mi - start + 1, 0), item["lifespan_months"])
+    if item["retired_on"] and month_index(item["retired_on"]) <= today_mi:
+        status = "retired"
+    elif item["recurring"]:
+        return {**item, "monthly_cost": round(monthly_cost(item)), "ends_on": None, "months_left": None, "book_value": 0, "status": "active"}
+    elif today_mi >= start + item["lifespan_months"]:
+        status = "paid_off"  # 償却済みだが使用中 = ボーナス期間
+    else:
+        status = "active"
+    return {
+        **item,
+        "monthly_cost": round(monthly_cost(item)),
+        "ends_on": month_label(start + item["lifespan_months"] - 1),
+        "months_left": max(start + item["lifespan_months"] - today_mi - 1, 0),
+        "book_value": 0 if status == "retired" else round(item["price"] - monthly_cost(item) * elapsed),
+        "status": status,
+    }
+
+
+def load_items(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM items ORDER BY purchased_on DESC, id DESC").fetchall()
+    tags: dict[int, list[str]] = {}
+    for r in conn.execute("SELECT item_id, tag FROM item_tags ORDER BY tag"):
+        tags.setdefault(r["item_id"], []).append(r["tag"])
+    return [{**dict(r), "tags": tags.get(r["id"], [])} for r in rows]
+
+
+def summarize(items: list[dict], budgets: dict[str, int], today_mi: int, back: int, ahead: int) -> dict:
+    months = list(range(today_mi - back, today_mi + ahead + 1))
+    timeline = [{"month": month_label(m), "cost": round(sum(cost_in_month(i, m) for i in items))} for m in months]
+
+    by_tag: dict[str, float] = {}
+    for i in items:
+        c = cost_in_month(i, today_mi)
+        for t in i["tags"] or [UNTAGGED]:
+            by_tag[t] = by_tag.get(t, 0.0) + c
+    tags = sorted(set(by_tag) | set(budgets), key=lambda t: -by_tag.get(t, 0))
+
+    enriched = [enrich(i, today_mi) for i in items]
+    return {
+        "month": month_label(today_mi),
+        "monthly_total": timeline[back]["cost"],
+        "budget_total": sum(budgets.values()),
+        "book_value": sum(i["book_value"] for i in enriched),
+        "active_count": sum(i["status"] == "active" and not i["recurring"] for i in enriched),
+        "subscription_total": round(sum(cost_in_month(i, today_mi) for i in items if i["recurring"])),
+        "subscription_count": sum(i["status"] == "active" and bool(i["recurring"]) for i in enriched),
+        "paid_off_count": sum(i["status"] == "paid_off" for i in enriched),
+        "timeline": timeline,
+        "tags": [{"tag": t, "cost": round(by_tag.get(t, 0)), "budget": budgets.get(t)} for t in tags],
+        "ending_soon": sorted(
+            (i for i in enriched if i["status"] == "active" and not i["recurring"] and i["months_left"] <= 3),
+            key=lambda i: i["months_left"],
+        ),
+    }
+
+
+# --- API ---
+
+class ItemIn(BaseModel):
+    name: str = Field(min_length=1)
+    price: int = Field(ge=0)
+    purchased_on: date
+    lifespan_months: int = Field(ge=1, le=1200)
+    retired_on: date | None = None
     note: str | None = None
+    tags: list[str] = []
+    recurring: bool = False
 
 
-class UpdateEffortLog(BaseModel):
-    date_key: str
-    hour_key: int = Field(ge=0, le=23)
-    effort: int = Field(ge=0, le=100)
-    note: str | None = None
+class BudgetIn(BaseModel):
+    monthly_limit: int = Field(ge=0)
 
 
 app = FastAPI(title="dash.v API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("DASH_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
 
 
@@ -139,128 +194,86 @@ def root() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
-@app.get("/api/time")
-def get_time() -> dict:
-    date_key, hour_key = now_keys()
-    return {"date_key": date_key, "hour_key": hour_key, "updated_at": datetime.now().isoformat()}
-
-
-@app.get("/api/latest-date")
-def get_latest_date() -> dict:
-    with get_conn() as conn:
-        row = conn.execute("SELECT COALESCE(MAX(date_key), date('now','localtime')) AS latest_date FROM effort_logs").fetchone()
-    return {"latest_date": row["latest_date"]}
-
-
-@app.post("/api/efforts")
-def create_effort(payload: CreateEffortLog) -> dict:
-    date_key, hour_key = now_keys()
-    with get_conn() as conn:
-        result = conn.execute(
-            """
-            INSERT INTO effort_logs (date_key, hour_key, effort, note)
-            VALUES (?, ?, ?, ?)
-            """,
-            [date_key, hour_key, payload.effort, payload.note],
-        )
-        inserted = conn.execute("SELECT * FROM effort_logs WHERE id = ?", [result.lastrowid]).fetchone()
-    return dict(inserted)
-
-
-@app.get("/api/efforts")
-def list_efforts(date: str) -> list[dict]:
-    with get_conn() as conn:
-        auto_close_stale_edits(conn)
-        rows = conn.execute(
-            """
-            SELECT id, date_key, hour_key, effort, note, edit_done, created_at, updated_at
-            FROM effort_logs
-            WHERE date_key = ?
-            ORDER BY hour_key DESC, id DESC
-            """,
-            [date],
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-@app.patch("/api/efforts/{log_id}")
-def update_effort(log_id: int, payload: UpdateEffortLog) -> dict:
-    with get_conn() as conn:
-        auto_close_stale_edits(conn)
-        exists = conn.execute("SELECT id, edit_done FROM effort_logs WHERE id = ?", [log_id]).fetchone()
-        if not exists:
-            raise HTTPException(status_code=404, detail="Log not found")
-        if int(exists["edit_done"]) == 1:
-            raise HTTPException(status_code=403, detail="Edit is locked for this log")
+def save_item(conn: sqlite3.Connection, item_id: int | None, p: ItemIn) -> int:
+    if p.retired_on and p.retired_on < p.purchased_on:
+        raise HTTPException(status_code=422, detail="retired_on must be after purchased_on")
+    values = [p.name.strip(), p.price, p.purchased_on.isoformat(), p.lifespan_months,
+              p.retired_on.isoformat() if p.retired_on else None, p.note, int(p.recurring)]
+    if item_id is None:
+        item_id = conn.execute(
+            "INSERT INTO items (name, price, purchased_on, lifespan_months, retired_on, note, recurring) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            values,
+        ).lastrowid
+    else:
         conn.execute(
-            """
-            UPDATE effort_logs
-            SET date_key = ?, hour_key = ?, effort = ?, note = ?, edit_done = 1, updated_at = datetime('now', 'localtime')
-            WHERE id = ?
-            """,
-            [payload.date_key, payload.hour_key, payload.effort, payload.note, log_id],
+            "UPDATE items SET name=?, price=?, purchased_on=?, lifespan_months=?, retired_on=?, note=?, recurring=? WHERE id=?",
+            [*values, item_id],
         )
-        updated = conn.execute("SELECT * FROM effort_logs WHERE id = ?", [log_id]).fetchone()
-    return dict(updated)
+    conn.execute("DELETE FROM item_tags WHERE item_id = ?", [item_id])
+    conn.executemany(
+        "INSERT INTO item_tags (item_id, tag) VALUES (?, ?)",
+        [(item_id, t) for t in {t.strip() for t in p.tags if t.strip()}],
+    )
+    return item_id
 
 
-@app.delete("/api/efforts/{log_id}")
-def remove_effort(log_id: int) -> dict:
+@app.get("/api/items")
+def list_items() -> list[dict]:
+    today_mi = month_index(date.today().isoformat())
     with get_conn() as conn:
-        deleted = conn.execute("DELETE FROM effort_logs WHERE id = ?", [log_id]).rowcount
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Log not found")
-    return {"ok": True, "id": log_id}
+        return [enrich(i, today_mi) for i in load_items(conn)]
 
 
-@app.get("/api/stats")
-def get_stats(date: str) -> dict:
+@app.post("/api/items")
+def create_item(payload: ItemIn) -> dict:
     with get_conn() as conn:
-        auto_close_stale_edits(conn)
-        day = conn.execute(
-            """
-            SELECT COUNT(*) AS total, ROUND(AVG(effort), 2) AS avg_effort
-            FROM effort_logs
-            WHERE date_key = ?
-            """,
-            [date],
-        ).fetchone()
-        weekly = conn.execute(
-            """
-            SELECT date_key, COUNT(*) AS count, ROUND(AVG(effort), 2) AS avg_effort
-            FROM effort_logs
-            WHERE date_key >= date(?, '-6 days') AND date_key <= ?
-            GROUP BY date_key
-            ORDER BY date_key
-            """,
-            [date, date],
-        ).fetchall()
-        by_hour = conn.execute(
-            """
-            SELECT hour_key, COUNT(*) AS count, ROUND(AVG(effort), 2) AS avg_effort
-            FROM effort_logs
-            WHERE date_key = ?
-            GROUP BY hour_key
-            ORDER BY hour_key
-            """,
-            [date],
-        ).fetchall()
-    return {
-        "day": dict(day),
-        "weekly": [dict(row) for row in weekly],
-        "by_hour": [dict(row) for row in by_hour],
-    }
+        return {"id": save_item(conn, None, payload)}
 
 
-@app.get("/api/impressive-tasks")
-def list_impressive_tasks() -> list[dict]:
+@app.put("/api/items/{item_id}")
+def update_item(item_id: int, payload: ItemIn) -> dict:
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, source_log_id, title, effort, note, created_at
-            FROM impressive_tasks
-            ORDER BY effort DESC, id DESC
-            LIMIT 5
-            """
-        ).fetchall()
-    return [dict(row) for row in rows]
+        if not conn.execute("SELECT 1 FROM items WHERE id = ?", [item_id]).fetchone():
+            raise HTTPException(status_code=404, detail="Item not found")
+        save_item(conn, item_id, payload)
+    return {"id": item_id}
+
+
+@app.delete("/api/items/{item_id}")
+def delete_item(item_id: int) -> dict:
+    with get_conn() as conn:
+        if conn.execute("DELETE FROM items WHERE id = ?", [item_id]).rowcount == 0:
+            raise HTTPException(status_code=404, detail="Item not found")
+    return {"ok": True}
+
+
+@app.get("/api/budgets")
+def list_budgets() -> dict[str, int]:
+    with get_conn() as conn:
+        return {r["tag"]: r["monthly_limit"] for r in conn.execute("SELECT * FROM budgets")}
+
+
+@app.put("/api/budgets/{tag}")
+def set_budget(tag: str, payload: BudgetIn) -> dict:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO budgets (tag, monthly_limit) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET monthly_limit = excluded.monthly_limit",
+            [tag, payload.monthly_limit],
+        )
+    return {"tag": tag, "monthly_limit": payload.monthly_limit}
+
+
+@app.delete("/api/budgets/{tag}")
+def delete_budget(tag: str) -> dict:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM budgets WHERE tag = ?", [tag])
+    return {"ok": True}
+
+
+@app.get("/api/summary")
+def get_summary(back: int = 12, ahead: int = 12) -> dict:
+    today_mi = month_index(date.today().isoformat())
+    with get_conn() as conn:
+        items = load_items(conn)
+        budgets = {r["tag"]: r["monthly_limit"] for r in conn.execute("SELECT * FROM budgets")}
+    return summarize(items, budgets, today_mi, max(back, 0), max(ahead, 0))
